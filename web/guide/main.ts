@@ -5,9 +5,11 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { CEL_WATER, DREAM, LEAVES, type LeafPalette, MUSHTREE, ROCKS, type RockColour } from '../look/palette';
+import { CEL_WATER, DREAM, INK, LEAVES, type LeafPalette, MUSHCORAL, MUSHTREE, ROCKS, SHELF, type RockColour } from '../look/palette';
 import { buildRocks } from '../look/rocks';
 import { buildMushTree } from '../look/mushtree';
+import { buildMushCoral } from '../look/mushcoral';
+import { buildShelf } from '../look/shelf';
 import { buildDream } from '../look/dream';
 import { celWater, type WaterOptions } from '../look/water';
 import { buildLeaves } from '../look/leaves';
@@ -113,7 +115,7 @@ liveScene(leafCanvas, (r, scene) => {
   const { tick, walker, bloom } = buildLeaves(scene, rnd, leafPal);
   // the walker: the approved toy-toon ball
   const sg = new THREE.SphereGeometry(0.35, 48, 24).translate(0, 0.35, 0), ball = new THREE.Mesh(sg, new THREE.MeshToonMaterial({ color: DREAM.creatures.cube, gradientMap: bands(DREAM.toon.bands) }));
-  const o = outline(sg, '#2a1838', 0.012, DREAM.ink.boil); ball.add(o); ball.castShadow = true; walker.add(ball);
+  const o = outline(sg, INK, 0.012, DREAM.ink.boil); ball.add(o); ball.castShadow = true; walker.add(ball);
   const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 80); camera.position.set(0, 5.2, 6.4); camera.lookAt(0, 0, 0.2);
   const composer = new EffectComposer(r); composer.setSize(W, H); composer.addPass(new RenderPass(scene, camera));
   composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), bloom.strength, bloom.radius, bloom.threshold)); composer.addPass(new OutputPass());
@@ -140,6 +142,42 @@ liveScene(rockCanvas, (_r, scene) => {
   const tick = buildRocks(scene, { colour: rockCol });
   const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 60);
   return { camera, tick: (t) => { tick(t); camera.position.set(0.4 + Math.sin(t * 0.25) * 1.2, 3.6, 8.6); camera.lookAt(0.3, 0.7, 0); } };
+});
+
+// ---------- approved 6: coral mushroom tree ----------
+const lin = (c: readonly [number, number, number]): string => '#' + new THREE.Color().setRGB(c[0], c[1], c[2], THREE.LinearSRGBColorSpace).getHexString();
+const coralCanvas = item('mushcoral', 6, MUSHCORAL.name, MUSHCORAL.from, MUSHCORAL.how, `
+  <h3>Caps (same as the mushroom tree)</h3>${swatches(MUSHCORAL.caps.flatMap((c, i): [string, string][] => [[`Cap ${i + 1} top`, c[0]], [`Cap ${i + 1} gills`, c[2]]]))}
+  <h3>Trunk</h3>${swatches([['Flesh', MUSHCORAL.flesh.color], ['Tip blush', lin(MUSHCORAL.flesh.tipBlush)], ['Ridge', lin(MUSHCORAL.flesh.ridge)], ['Ridge lip', lin(MUSHCORAL.flesh.ridgeLip)], ['Lichen mint', lin(MUSHCORAL.lichen[0])], ['Lichen lavender', lin(MUSHCORAL.lichen[1])]])}
+  <h3>Base and ink</h3>${swatches([['Base', MUSHCORAL.flesh.color], ['Edge peach', lin(MUSHCORAL.base.peach)], ['Edge coral', lin(MUSHCORAL.base.coral)], ['Edge rim', lin(MUSHCORAL.base.rim)], ['Ink line', MUSHCORAL.ink.color]])}
+  <h3>Recipe</h3>${recipe([
+    ['Trunk', 'a sweeping tapering tube that forks 3 then 2 ways like coral; long fibres along each branch, peach blush towards the tips; flares at the foot'],
+    ['Ridges', 'the rock cracks, stretched up the trunk: noise contours in some areas, dark groove + thin light lip'],
+    ['Lichen', 'ragged noise patches in mint or lavender with a pale frilly edge and speckled crust; glow a little so they keep colour in shade'],
+    ['Caps', 'the approved mushroom-tree caps at every branch tip (big) and half-way along (small), plus 11 spiralling up the trunk'],
+    ['Base', `a ${MUSHCORAL.base.thickness}-thick patch with a ragged burnt-paper outline: cream, then peach, coral and a deep coral rim, edge curling up a little; the trunk goes right through it and roots spread over the top`],
+    ['Ink lines', `inverted-hull outline ${MUSHCORAL.ink.width} (caps ${MUSHCORAL.ink.capWidth}), boiling like the dream meadow`],
+    ['Motion', 'caps bob and sway gently'],
+  ])}`);
+liveScene(coralCanvas, (r, scene) => {
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.0;
+  return buildMushCoral(scene, W / H);
+});
+
+// ---------- approved 7: shelf mushroom plant ----------
+const shelfCanvas = item('shelf', 7, SHELF.name, SHELF.from, SHELF.how, `
+  <h3>Caps, spores and stalk</h3>${swatches([['Cap top', SHELF.cap.top], ['Cap spots', SHELF.cap.spot], ['Gills', SHELF.cap.gill], ['Gill lines', SHELF.cap.line], ['Spores', SHELF.spores.color], ['Birch stalk', SHELF.stalk.color], ['Patch', SHELF.patch.color], ['Patch rim', SHELF.patch.rim], ['Ink line', SHELF.ink.color]])}
+  <h3>Recipe</h3>${recipe([
+    ['Stalk', `a short tapering birch tube (${SHELF.stalk.r0} to ${SHELF.stalk.r1})`],
+    ['Caps', `${SHELF.caps.length} of the approved mushroom-tree caps stepping up and around the stalk, gills glowing ${SHELF.gillGlow}`],
+    ['Spore marks', 'big teal specks on the cap tops, crowded by the stalk and thinning out to the rim, plus soft teal patches; the top cap has fewer'],
+    ['Falling spores', `${SHELF.spores.count} teal spores drifting down off the gills, swelling then shrinking as they fall`],
+    ['Ground', 'a little cream patch with a coral rim'],
+    ['Motion', 'the whole plant sways gently'],
+  ])}`);
+liveScene(shelfCanvas, (r, scene) => {
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.0;
+  return buildShelf(scene, W / H);
 });
 
 // ---------- render what's on screen ----------

@@ -38,7 +38,7 @@ export function buildDream(scene: THREE.Scene, aspect: number): { camera: THREE.
   const toonG = bands(D.toon.bands);
   const cg = cubeGeo(1.2), cube = new THREE.Mesh(cg, new THREE.MeshToonMaterial({ color: D.creatures.cube, gradientMap: toonG })); cube.castShadow = true; scene.add(cube);
   const sg = new THREE.SphereGeometry(0.55, 64, 32).translate(0, 0.55, 0), ball = new THREE.Mesh(sg, new THREE.MeshToonMaterial({ color: D.creatures.ball, gradientMap: toonG })); ball.castShadow = true; scene.add(ball);
-  const o1 = outline(cg, D.ink.color, D.ink.width, D.ink.boil), o2 = outline(sg, D.ink.color, 0.013, D.ink.boil); cube.add(o1); ball.add(o2);
+  const o1 = outline(cg, D.ink.color, D.ink.width, D.ink.boil, false), o2 = outline(sg, D.ink.color, 0.013, D.ink.boil, false); cube.add(o1); ball.add(o2);
   cube.position.set(-0.7, 0, 0.2); ball.position.set(1.3, 0, 0.6);
 
   // the warm lantern

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 // Shared helpers, ported exactly from the dream-meadow combo the look is based on.
 
 export const NOISE = /* glsl */ `
@@ -30,17 +31,29 @@ export function bands(levels: number[]): THREE.DataTexture {
 }
 
 /** Inverted-hull outline pushed out along the normal; `boil` makes it redraw 8 times a second like a hand-drawn line. */
-export function outline(geo: THREE.BufferGeometry, color: string, width: number, boil = 0): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
+/** Ink lines are drawn this much thicker than the widths written in the palette (one knob for every approved item). */
+export const INK_SCALE = 1.3;
+/** Never thinner than this on screen (fraction of half the screen height, about 1.5px at 720p), so far or small things keep a line. */
+export const INK_MIN = 0.004;
+
+/** Inverted-hull outline pushed out along smoothed normals; `boil` makes it redraw 8 times a second like a hand-drawn line.
+ *  Smoothed normals stop the hull splitting open at hard edges and seams; the boil only wobbles the width by +-25% so it never vanishes. */
+export function outline(geo: THREE.BufferGeometry, color: string, width: number, boil = 0, trueColour = true): THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> {
+  const flat = new THREE.BufferGeometry(); flat.setAttribute('position', geo.attributes.position.clone()); if (geo.index) flat.setIndex(geo.index.clone());
+  const hull = mergeVertices(flat, 1e-4); hull.computeVertexNormals();
   const m = new THREE.ShaderMaterial({
-    uniforms: { c: { value: new THREE.Color(color) }, w: { value: width }, t: { value: 0 }, boil: { value: boil } }, side: THREE.BackSide,
-    vertexShader: NOISE + `uniform float w; uniform float t; uniform float boil;
+    uniforms: { c: { value: new THREE.Color(color) }, w: { value: width * INK_SCALE }, t: { value: 0 }, boil: { value: boil }, minW: { value: INK_MIN } }, side: THREE.BackSide,
+    vertexShader: NOISE + `uniform float w; uniform float t; uniform float boil; uniform float minW;
       void main(){ float st = floor(t*8.);
-        float j = boil * (hash(position.xy*7. + st) - .5);
-        vec3 p = position + normal * (w * (1. + j));
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.); }`,
-    fragmentShader: `uniform vec3 c; void main(){ gl_FragColor = vec4(c,1.); }`,
+        float j = boil * (hash(position.xy*7. + st) - .5) * .55;
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position + normal * (w * (1. + j)), 1.);
+        vec2 sn = (projectionMatrix * vec4(normalize(normalMatrix * normal), 0.)).xy; float l = length(sn);
+        if (l > 1e-5) clip.xy += sn / l * vec2(projectionMatrix[0][0] / projectionMatrix[1][1], 1.) * minW * (1. + j) * clip.w;   // a minimum on-screen thickness
+        clip.z += .0003 * clip.w;                                     // sit just behind surfaces so it can't poke through thin caps, only shows round the edge
+        gl_Position = clip; }`,
+    fragmentShader: `uniform vec3 c; void main(){ gl_FragColor = vec4(c,1.);${trueColour ? '\n        #include <colorspace_fragment>' : ''} }`,   // trueColour: show the palette colour as written
   });
-  return new THREE.Mesh(geo, m);
+  return new THREE.Mesh(hull, m);
 }
 
 /** A poke that wobbles then settles. */

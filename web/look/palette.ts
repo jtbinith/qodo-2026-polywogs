@@ -1,6 +1,9 @@
 // Polywogs look: the single source of truth for the APPROVED look. Only approved ingredients live here.
 // The guide page reads from here, the world renders from here, and skills/polywogs-look/SKILL.md points here.
 
+/** The outline colour for everything in daylight: a deep plum instead of black, for a vibrant, colourful line. */
+export const INK = '#4a1d4f';
+
 /** Approved 1: the dream meadow combo (night meadow + toy toon + ink lines). Values are exactly the approved version. */
 export const DREAM = {
   name: 'Dream meadow (combo)',
@@ -42,7 +45,7 @@ export const MUSHTREE = {
   background: '#6e6e6e',
   camera: { fov: 34, position: [0.6, 3.6, 11] as [number, number, number], target: [0, 2.7, 0] as [number, number, number] },
   light: { sky: '#fff1dc', ground: '#5a4a52', fill: 1.25, key: '#fff2dc', keyIntensity: 2.2, keyPosition: [-5, 8, 6] as [number, number, number] },
-  ink: { color: '#2a140f', width: 0.014, capWidth: 0.016 },
+  ink: { color: INK, width: 0.014, capWidth: 0.016 },
   trunk: { color: '#e6d6bc', marks: '#33262b', grooveDepth: 0.86 },
   caps: [ // y, radius, facing angle, fan span, tilt, then top / spots / gills / gill lines
     { y: 2.85, r: 1.95, angle: 0.5, span: 4.1, tilt: 0.1, top: '#ffb56a', spot: '#ffd9a0', gill: '#e86f55', line: '#b8463a' },
@@ -86,9 +89,48 @@ export const ROCKS = {
     sandstone: { light: '#d8b9a0', mid: '#b8957e', dark: '#86685a', crack: '#6a4e44' },
   },
   colourNames: { taupe: 'Warm taupe', slate: 'Cool slate', sandstone: 'Sandstone' },
-  ink: '#2a2521',
+  ink: INK,
   moss: ['#3f6a22', '#5f8f2a', '#86b83a', '#a8d44a', '#cde86a'],          // dark crevice -> sunny tips
   mossDensity: 900,                                                        // clumps per unit of rock top area
   sun: [-0.75, 0.55, 0.4] as [number, number, number],
 };
 export type RockColour = keyof typeof ROCKS.colours;
+
+/** Approved 6: coral mushroom tree. The approved caps on a branching coral-fungus trunk, on a burnt-paper patch.
+ *  Shader colours are linear RGB triples (used as-is in GLSL); hex colours go through three's colour management. */
+export const MUSHCORAL = {
+  name: 'Coral mushroom tree',
+  from: 'a variation of the mushroom tree, after a coral fungus photo',
+  how: 'A cream fungus trunk sweeps up and forks like coral, with fibres along each branch, a peach blush at the tips, ridges like the rock cracks (dark groove, light lip) and mint and lavender lichen patches. The approved mushroom-tree caps sit at every branch tip and spiral up the trunk. It stands in a thick patch with a ragged burnt-paper edge that goes cream to peach to coral; the trunk flares out and goes right through it, with roots spreading over the top.',
+  seed: 5,
+  background: ['#9aa3ab', '#e3e7ea'] as [string, string],
+  camera: { fov: 34, position: [0.5, 7.2, 14.5] as [number, number, number], target: [0, 3.2, 0] as [number, number, number] },
+  light: { sky: '#fff1dc', ground: '#5a4a52', fill: 1.25, key: '#fff2dc', keyIntensity: 2.2, keyPosition: [-5, 8, 6] as [number, number, number] },
+  ink: { color: INK, width: 0.012, capWidth: 0.016 },
+  flesh: { color: '#fbeadb', tipBlush: [1, 0.72, 0.55] as const, ridge: [0.42, 0.3, 0.28] as const, ridgeLip: [1, 0.97, 0.92] as const },
+  lichen: [[0.45, 0.86, 0.64], [0.68, 0.54, 0.92]] as const,
+  base: { peach: [1, 0.69, 0.4] as const, coral: [0.81, 0.16, 0.09] as const, rim: [0.48, 0.06, 0.04] as const, thickness: 0.16 },
+  caps: [ // top / spots / gills / gill lines, same as the mushroom tree
+    ['#ffb56a', '#ffd9a0', '#e86f55', '#b8463a'], ['#ffa862', '#ffd29a', '#e5664f', '#b03f35'], ['#ffb370', '#ffdcaa', '#ea7560', '#b84a3e'], ['#ffbd7a', '#ffe0b0', '#ee7a64', '#bf5244'],
+  ] as [string, string, string, string][],
+};
+
+/** Approved 7: shelf mushroom plant. Three of the approved caps stepping up a birch stalk, teal spore marks and falling spores. */
+export const SHELF = {
+  name: 'Shelf mushroom',
+  from: 'a small plant from the mushroom-tree caps',
+  how: 'Three baby mushroom-tree caps step up and around a short tapering birch stalk. Their tops carry teal spore specks, crowded by the stalk and thinning out to the rim, with soft teal patches; teal spores drift down off the gills. It sits on a little cream patch with a coral rim and sways gently.',
+  seed: 9,
+  background: ['#9aa3ab', '#e3e7ea'] as [string, string],
+  camera: { fov: 34, position: [0.3, 1.5, 3.3] as [number, number, number], target: [0, 0.68, 0] as [number, number, number] },
+  light: { sky: '#fff1dc', ground: '#5a4a52', fill: 1.25, key: '#fff2dc', keyIntensity: 2.2, keyPosition: [-5, 8, 6] as [number, number, number] },
+  ink: { color: INK, width: 0.01, capWidth: 0.012 },
+  stalk: { color: '#e6d6bc', r0: 0.09, r1: 0.035 },
+  cap: { top: '#ffb56a', spot: '#ffd9a0', gill: '#e86f55', line: '#b8463a' },
+  gillGlow: 0.45,
+  caps: [ // height, radius, facing angle, spore amount
+    { y: 0.45, r: 0.42, angle: 0.4, spores: 0.55 }, { y: 0.82, r: 0.34, angle: 2.6, spores: 0.55 }, { y: 1.18, r: 0.26, angle: -0.9, spores: 0.2 },
+  ],
+  spores: { color: '#2fa7a0', size: 0.02, count: 30 },
+  patch: { color: '#fbeadb', rim: '#e86f55' },
+};
