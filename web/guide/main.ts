@@ -23,10 +23,35 @@ const recipe = (list: [string, string][]) => `<ul class="recipe">${list.map(([k,
 
 interface Live { canvas: HTMLCanvasElement; render: (t: number) => void; visible: boolean }
 const lives: Live[] = [];
-function item(id: string, n: number, title: string, from: string, how: string, body: string): HTMLCanvasElement {
-  const el = document.createElement('section'); el.className = 'item'; el.id = id;
-  el.innerHTML = `<span class="tag">Approved ${n}</span><h2>${title}</h2><p class="from">${from}</p><p class="how">${how}</p><canvas width="${W}" height="${H}"></canvas>${body}`;
-  document.getElementById('approved')!.appendChild(el); return el.querySelector('canvas')!;
+
+// ---------- page layout: grouped by ingredient, with a contents bar and one master palette ----------
+const GROUPS = {
+  palette: { title: 'Colour palette', note: 'Every approved colour on one sheet, duplicates merged.' },
+  world: { title: 'World look', note: 'The overall night style everything else sits in.' },
+  sky: { title: 'Sky & air', note: 'Nothing on its own yet. The night sky, stars and fog are part of the dream meadow.' },
+  ground: { title: 'Ground', note: '' },
+  land: { title: 'Land & water', note: '' },
+  plants: { title: 'Plants', note: '' },
+  creatures: { title: 'Creatures', note: 'Nothing on its own yet. The toy-toon cube and ball are part of the dream meadow.' },
+} as const;
+type Group = Exclude<keyof typeof GROUPS, 'palette'>;
+const root = document.getElementById('approved')!;
+document.body.insertAdjacentHTML('afterbegin', `<nav class="toc"><b>Contents</b>${Object.entries(GROUPS).map(([k, g]) => `<a class="tg" href="#g-${k}">${g.title}</a><div class="ti" id="toc-${k}"></div>`).join('')}</nav>`);
+for (const [k, g] of Object.entries(GROUPS)) root.insertAdjacentHTML('beforeend', `<section class="group" id="g-${k}"><h2 class="gtitle">${g.title}</h2>${g.note ? `<p class="lead gnote">${g.note}</p>` : ''}<div class="gitems"></div></section>`);
+let shown = 0;
+function item(id: string, group: Group, title: string, from: string, how: string, body: string): HTMLCanvasElement {
+  const el = document.createElement('section'); el.className = 'item'; el.id = id; el.dataset.title = title;
+  el.innerHTML = `<span class="tag">Approved ${++shown}</span><h2>${title}</h2><p class="from">${from}</p><p class="how">${how}</p><canvas width="${W}" height="${H}"></canvas>${body}`;
+  // shorter cards: colours and recipe fold away; live controls and extra views stay visible
+  const fold = document.createElement('details'); fold.className = 'fold'; fold.innerHTML = '<summary>Colours and recipe</summary>';
+  [...el.children].slice([...el.children].indexOf(el.querySelector('canvas')!) + 1).forEach((c) => {
+    const keep = c.classList.contains('ctl') || c.tagName === 'CANVAS' || (c.tagName === 'H3' && c.nextElementSibling?.tagName === 'CANVAS');
+    if (!keep) fold.appendChild(c); });
+  el.appendChild(fold);
+  const g = document.querySelector(`#g-${group}`)!; g.querySelector('.gnote')?.remove();
+  g.querySelector('.gitems')!.appendChild(el);
+  document.getElementById(`toc-${group}`)!.insertAdjacentHTML('beforeend', `<a href="#${id}">${title}</a>`);
+  return el.querySelector('canvas')!;
 }
 
 // one renderer per approved item, so each keeps exactly its own approved settings
@@ -38,7 +63,7 @@ function liveScene(canvas: HTMLCanvasElement, setup: (r: THREE.WebGLRenderer, sc
 }
 
 // ---------- approved 1: dream meadow (combo) ----------
-const dreamCanvas = item('dream', 1, DREAM.name, DREAM.from, DREAM.how, `
+const dreamCanvas = item('dream', 'world', DREAM.name, DREAM.from, DREAM.how, `
   <h3>Colours</h3>${swatches([['Sky', DREAM.sky], ['Fog', DREAM.fog.color], ['Fill from sky', DREAM.fill.sky], ['Fill from ground', DREAM.fill.ground], ['Moonlight', DREAM.moon.color], ['Front moonlight', DREAM.frontMoon.color], ['Ground', DREAM.ground], ['Stars', DREAM.stars.color]])}
   <h3>Meadow</h3>${swatches([...DREAM.meadow.palette.map((h, i): [string, string] => [`Meadow ${i + 1}`, h]), ['Paths', DREAM.meadow.path], ['Glow in shade', DREAM.meadow.emissive]])}
   <h3>Creatures, ink and lantern</h3>${swatches([['Toy cube', DREAM.creatures.cube], ['Toy ball', DREAM.creatures.ball], ['Ink line', DREAM.ink.color], ['Lantern', DREAM.lantern.core], ['Lantern light', DREAM.lantern.light]])}
@@ -62,7 +87,7 @@ liveScene(dreamCanvas, (r, scene) => {
 
 // ---------- approved 2: water (2 versions) ----------
 const waterBody = (label: string) => `<h3>${label}</h3><canvas width="${W}" height="${H}"></canvas>`;
-const waterEl = item('water', 2, CEL_WATER.name, 'W1 open water, W3 pond with shore', CEL_WATER.how, `
+const waterEl = item('water', 'land', CEL_WATER.name, 'W1 open water, W3 pond with shore', CEL_WATER.how, `
   ${waterBody('W3 · pond: + star sparkles + sandy shore')}
   <h3>Colours</h3>${swatches([['Water deep', CEL_WATER.deep], ['Water light', CEL_WATER.light], ['Foam', CEL_WATER.foam], ['Star sparkle', CEL_WATER.sparkle], ['Sand', CEL_WATER.sand]])}
   <h3>Recipe</h3>${recipe([['Surface', '2 flat colours from slow noise, no gradients'],
@@ -77,7 +102,7 @@ const waterScene = (canvas: HTMLCanvasElement, o: WaterOptions) => liveScene(can
 waterScene(w1Canvas, { rings: true }); waterScene(w3Canvas, { rings: true, sparkles: true, shore: true });
 
 // ---------- approved 3: mushroom tree ----------
-const treeCanvas = item('mushtree', 3, MUSHTREE.name, MUSHTREE.from, MUSHTREE.how, `
+const treeCanvas = item('mushtree', 'plants', MUSHTREE.name, MUSHTREE.from, MUSHTREE.how, `
   <h3>Caps</h3>${swatches(MUSHTREE.caps.flatMap((c, i): [string, string][] => [[`Cap ${i + 1} top`, c.top], [`Cap ${i + 1} spots`, c.spot], [`Cap ${i + 1} gills`, c.gill]]))}
   <h3>Trunk, ink and ground</h3>${swatches([['Birch trunk', MUSHTREE.trunk.color], ['Birch marks', MUSHTREE.trunk.marks], ['Ink line', MUSHTREE.ink.color], ['Dirt', MUSHTREE.dirt], ['Stage', MUSHTREE.background]])}
   <h3>Recipe</h3>${recipe([
@@ -96,7 +121,7 @@ liveScene(treeCanvas, (r, scene) => {
 
 // ---------- approved 4: maple leaves (3 colour sets) ----------
 const leafPal: LeafPalette = (q.get('leaves') as LeafPalette) ?? 'golden';
-const leafCanvas = item('leaves', 4, LEAVES.name, `maple, ${LEAVES.size}x, colour sets: ${Object.values(LEAVES.paletteNames).join(', ')}`, LEAVES.how, `
+const leafCanvas = item('leaves', 'ground', LEAVES.name, `maple, ${LEAVES.size}x, colour sets: ${Object.values(LEAVES.paletteNames).join(', ')}`, LEAVES.how, `
   <div class="ctl" style="margin-top:12px">Colours ${(Object.keys(LEAVES.palettes) as LeafPalette[]).map((k) => `<a class="pill ${k === leafPal ? 'on' : ''}" href="?leaves=${k}#leaves">${LEAVES.paletteNames[k]}</a>`).join('')}</div>
   ${(Object.keys(LEAVES.palettes) as LeafPalette[]).map((k) => `<h3>${LEAVES.paletteNames[k]}</h3>${swatches([...LEAVES.palettes[k].map((h, i): [string, string] => [`Leaf ${i + 1}`, h]), ['Glow tint', LEAVES.glowTint[k]]])}`).join('')}
   <h3>Recipe</h3>${recipe([
@@ -124,7 +149,7 @@ liveScene(leafCanvas, (r, scene) => {
 
 // ---------- approved 5: rocks (3 stone colours) ----------
 const rockCol: RockColour = (q.get('rocks') as RockColour) ?? 'taupe';
-const rockCanvas = item('rocks', 5, ROCKS.name, `round, cushion moss, cracks; stone colours: ${Object.values(ROCKS.colourNames).join(', ')}`, ROCKS.how, `
+const rockCanvas = item('rocks', 'land', ROCKS.name, `round, cushion moss, cracks; stone colours: ${Object.values(ROCKS.colourNames).join(', ')}`, ROCKS.how, `
   <div class="ctl" style="margin-top:12px">Stone ${(Object.keys(ROCKS.colours) as RockColour[]).map((k) => `<a class="pill ${k === rockCol ? 'on' : ''}" href="?rocks=${k}#rocks">${ROCKS.colourNames[k]}</a>`).join('')}</div>
   ${(Object.keys(ROCKS.colours) as RockColour[]).map((k) => `<h3>${ROCKS.colourNames[k]}</h3>${swatches([['Light', ROCKS.colours[k].light], ['Mid', ROCKS.colours[k].mid], ['Dark', ROCKS.colours[k].dark], ['Crack', ROCKS.colours[k].crack]])}`).join('')}
   <h3>Moss and ink</h3>${swatches([...ROCKS.moss.map((h, i): [string, string] => [i === 0 ? 'Moss crevice' : i === ROCKS.moss.length - 1 ? 'Moss tips' : `Moss ${i + 1}`, h]), ['Ink line', ROCKS.ink]])}
@@ -133,6 +158,7 @@ const rockCanvas = item('rocks', 5, ROCKS.name, `round, cushion moss, cracks; st
     ['Stone', '3 flat tones by sun angle: light top, mid side, dark shade side'],
     ['Cracks', 'noise contours on each face, only in some areas; dark crack + a thin light lip on the lit side'],
     ['Moss', `cushion clumps (${ROCKS.mossDensity} per unit of area) where moss noise > 0: patchy, mostly on top, hanging over edges; darker deep down, lime at the sunny tips; a thin damp green rim and a shadow under the lip`],
+    ['Moss texture', `3D noise bumps each clump's lighting (${ROCKS.mossTexture.bump} at ${ROCKS.mossTexture.bumpFreq}x) so band edges go lumpy, and splits it into big flat blotches (${ROCKS.mossTexture.mottleFreq}x) of the darkest and brightest moss greens`],
     ['Extras', 'pebbles around the bases; hand-drawn ink outline'],
   ])}`);
 liveScene(rockCanvas, (_r, scene) => {
@@ -146,7 +172,7 @@ liveScene(rockCanvas, (_r, scene) => {
 
 // ---------- approved 6: coral mushroom tree ----------
 const lin = (c: readonly [number, number, number]): string => '#' + new THREE.Color().setRGB(c[0], c[1], c[2], THREE.LinearSRGBColorSpace).getHexString();
-const coralCanvas = item('mushcoral', 6, MUSHCORAL.name, MUSHCORAL.from, MUSHCORAL.how, `
+const coralCanvas = item('mushcoral', 'plants', MUSHCORAL.name, MUSHCORAL.from, MUSHCORAL.how, `
   <h3>Caps (same as the mushroom tree)</h3>${swatches(MUSHCORAL.caps.flatMap((c, i): [string, string][] => [[`Cap ${i + 1} top`, c[0]], [`Cap ${i + 1} gills`, c[2]]]))}
   <h3>Trunk</h3>${swatches([['Flesh', MUSHCORAL.flesh.color], ['Tip blush', lin(MUSHCORAL.flesh.tipBlush)], ['Ridge', lin(MUSHCORAL.flesh.ridge)], ['Ridge lip', lin(MUSHCORAL.flesh.ridgeLip)], ['Lichen mint', lin(MUSHCORAL.lichen[0])], ['Lichen lavender', lin(MUSHCORAL.lichen[1])]])}
   <h3>Base and ink</h3>${swatches([['Base', MUSHCORAL.flesh.color], ['Edge peach', lin(MUSHCORAL.base.peach)], ['Edge coral', lin(MUSHCORAL.base.coral)], ['Edge rim', lin(MUSHCORAL.base.rim)], ['Ink line', MUSHCORAL.ink.color]])}
@@ -165,7 +191,7 @@ liveScene(coralCanvas, (r, scene) => {
 });
 
 // ---------- approved 7: shelf mushroom plant ----------
-const shelfCanvas = item('shelf', 7, SHELF.name, SHELF.from, SHELF.how, `
+const shelfCanvas = item('shelf', 'plants', SHELF.name, SHELF.from, SHELF.how, `
   <h3>Caps, spores and stalk</h3>${swatches([['Cap top', SHELF.cap.top], ['Cap spots', SHELF.cap.spot], ['Gills', SHELF.cap.gill], ['Gill lines', SHELF.cap.line], ['Spores', SHELF.spores.color], ['Birch stalk', SHELF.stalk.color], ['Patch', SHELF.patch.color], ['Patch rim', SHELF.patch.rim], ['Ink line', SHELF.ink.color]])}
   <h3>Recipe</h3>${recipe([
     ['Stalk', `a short tapering birch tube (${SHELF.stalk.r0} to ${SHELF.stalk.r1})`],
@@ -179,6 +205,15 @@ liveScene(shelfCanvas, (r, scene) => {
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.0;
   return buildShelf(scene, W / H);
 });
+
+// ---------- master palette: every swatch above, merged by colour ----------
+{ const seen = new Map<string, { name: string; from: string[] }>(), byGroup = new Map<string, string[]>();
+  document.querySelectorAll<HTMLElement>('.group .item').forEach((it) => { const grp = it.closest('.group')!.querySelector('.gtitle')!.textContent!;
+    it.querySelectorAll('.sw').forEach((sw) => { const hex = sw.querySelector('span')!.textContent!.toLowerCase(), name = sw.querySelector('b')!.textContent!;
+      const e = seen.get(hex); if (e) { if (!e.from.includes(it.dataset.title!)) e.from.push(it.dataset.title!); return; }
+      seen.set(hex, { name, from: [it.dataset.title!] }); byGroup.set(grp, [...(byGroup.get(grp) ?? []), hex]); }); });
+  document.querySelector('#g-palette .gitems')!.classList.add('master'); document.querySelector('#g-palette .gitems')!.innerHTML = [...byGroup].map(([grp, hexes]) => `<h3>${grp}</h3><div class="row">${hexes.map((h) => { const e = seen.get(h)!;
+    return `<div class="sw" title="${e.from.join(', ')}"><div class="chip" style="background:${h}"></div><div class="meta"><b>${e.name}</b><span>${h}</span><i>${e.from.join(', ')}</i></div></div>`; }).join('')}</div>`).join(''); }
 
 // ---------- render what's on screen ----------
 const io = new IntersectionObserver((es) => es.forEach((e) => { const l = lives.find((x) => x.canvas === e.target); if (l) l.visible = e.isIntersecting; }), { rootMargin: '200px' });

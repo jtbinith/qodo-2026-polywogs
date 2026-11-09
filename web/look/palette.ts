@@ -81,7 +81,7 @@ export type LeafPalette = keyof typeof LEAVES.palettes;
  *  and cushion moss: small puffy toon clumps where layered noise says moss grows (patchy, mostly on top, hanging over edges). */
 export const ROCKS = {
   name: 'Rocks',
-  how: 'Round boulders with lots of small flat faces, lit in 3 flat tones (light top, mid side, dark shade side). Long wiggly cracks cut across some faces with a thin light lip on one side. Pebbles sit around the bases. Cushion moss grows where layered noise says so: patchy, mostly on top, hanging over the edges, made of small puffy toon clumps that are darker deep down and bright lime at the sunny tips, with a thin damp green rim on the stone. Three stone colours.',
+  how: 'Round boulders with lots of small flat faces, lit in 3 flat tones (light top, mid side, dark shade side). Long wiggly cracks cut across some faces with a thin light lip on one side. Pebbles sit around the bases. Cushion moss grows where layered noise says so: patchy, mostly on top, hanging over the edges, made of small puffy toon clumps that are darker deep down and bright lime at the sunny tips, with a thin damp green rim on the stone. Noise bumps the lighting on each clump so the band edges go lumpy, and splits it into a few big flat blotches of the neighbouring moss greens. Three stone colours.',
   shape: { points: 70, jitter: 0.05 },
   colours: {
     taupe: { light: '#b3aa9e', mid: '#8f877d', dark: '#625c56', crack: '#4a443f' },
@@ -92,6 +92,7 @@ export const ROCKS = {
   ink: INK,
   moss: ['#3f6a22', '#5f8f2a', '#86b83a', '#a8d44a', '#cde86a'],          // dark crevice -> sunny tips
   mossDensity: 900,                                                        // clumps per unit of rock top area
+  mossTexture: { bump: 0.55, bumpFreq: 38, mottleFreq: 9 },               // noise on each clump: lumpy band edges + big flat blotches
   sun: [-0.75, 0.55, 0.4] as [number, number, number],
 };
 export type RockColour = keyof typeof ROCKS.colours;

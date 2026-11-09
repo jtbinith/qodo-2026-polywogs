@@ -54,11 +54,41 @@ function rockMat(o: RockOptions): THREE.ShaderMaterial {
 // ---------- moss styles ----------
 let toonG: THREE.DataTexture | null = null;
 const mossToon = () => (toonG ??= bands([90, 175, 255]));
+/** Approved: Perlin-style 3D noise on each clump. (1) bumps the lighting so the band edges go lumpy, (2) splits the clump into
+ *  flat blotches of the neighbouring moss greens. Still hard toon bands, no gradients. */
+const MOSS_TEX = ROCKS.mossTexture;
+function texturedMoss(mat: THREE.MeshToonMaterial): void {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uDeep = { value: new THREE.Color(ROCKS.moss[0]) }; sh.uniforms.uTip = { value: new THREE.Color(ROCKS.moss[4]) };
+    sh.vertexShader = 'varying vec3 vMossP;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      vec4 mp = vec4(transformed, 1.);
+      #ifdef USE_INSTANCING
+        mp = instanceMatrix * mp;
+      #endif
+      vMossP = (modelMatrix * mp).xyz;`);
+    sh.fragmentShader = `varying vec3 vMossP; uniform vec3 uDeep, uTip;
+      float h3(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+      float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+        return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z); }
+      float fbm3(vec3 p){ float s = 0., a = .5; for (int i = 0; i < 3; i++) { s += a * n3(p); p *= 2.07; a *= .5; } return s / .875; }
+    ` + sh.fragmentShader
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float mo = fbm3(vMossP * ${MOSS_TEX.mottleFreq.toFixed(1)});
+        if (mo > .64) diffuseColor.rgb = mix(diffuseColor.rgb, uTip, .38); else if (mo < .36) diffuseColor.rgb = mix(diffuseColor.rgb, uDeep, .42);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        vec3 bp = vMossP * ${MOSS_TEX.bumpFreq.toFixed(1)};
+        vec3 bn = vec3(fbm3(bp), fbm3(bp + 17.3), fbm3(bp + 41.9)) - .5;
+        normal = normalize(normal + ${MOSS_TEX.bump.toFixed(2)} * 2. * (viewMatrix * vec4(bn, 0.)).xyz);`);
+  };
+  mat.customProgramCacheKey = () => 'moss-textured';
+}
 /** Cushion: hundreds of small puffy toon clumps where the noise says moss grows. Darker deep down, brighter at the sunny tips. */
 function cushion(rock: THREE.Mesh, density: number): THREE.Object3D {
   const sampler = new MeshSurfaceSampler(rock).build(), p = new THREE.Vector3(), n = new THREE.Vector3(), wp = new THREE.Vector3(), wn = new THREE.Vector3();
   const blob = new THREE.SphereGeometry(1, 12, 8); blob.scale(1, 0.6, 1);
-  const N = Math.round(density), im = new THREE.InstancedMesh(blob, new THREE.MeshToonMaterial({ color: '#ffffff', gradientMap: mossToon() }), N);
+  const mat = new THREE.MeshToonMaterial({ color: '#ffffff', gradientMap: mossToon() }); texturedMoss(mat);
+  const N = Math.round(density), im = new THREE.InstancedMesh(blob, mat, N);
   const d = new THREE.Object3D(), col = new THREE.Color(), up = new THREE.Vector3(0, 1, 0); let k = 0, guard = 0;
   rock.updateMatrixWorld();
   while (k < N && guard++ < N * 12) { sampler.sample(p, n); wp.copy(p).applyMatrix4(rock.matrixWorld); wn.copy(n).transformDirection(rock.matrixWorld);
