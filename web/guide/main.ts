@@ -5,7 +5,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { CEL_WATER, DREAM, LEAVES, type LeafPalette, MUSHTREE } from '../look/palette';
+import { CEL_WATER, DREAM, LEAVES, type LeafPalette, MUSHTREE, ROCKS, type RockColour } from '../look/palette';
+import { buildRocks } from '../look/rocks';
 import { buildMushTree } from '../look/mushtree';
 import { buildDream } from '../look/dream';
 import { celWater, type WaterOptions } from '../look/water';
@@ -117,6 +118,28 @@ liveScene(leafCanvas, (r, scene) => {
   const composer = new EffectComposer(r); composer.setSize(W, H); composer.addPass(new RenderPass(scene, camera));
   composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), bloom.strength, bloom.radius, bloom.threshold)); composer.addPass(new OutputPass());
   return { camera, composer, tick: (t) => { tick(t); o.material.uniforms.t.value = t; const ph = (t * 1.6) % 1; ball.position.y = 4 * ph * (1 - ph) * 0.35; const sq = spring(t * 1.6, 1, 22, 6) * 0.15; ball.scale.set(1 + sq, 1 - sq * 1.5, 1 + sq); } };
+});
+
+// ---------- approved 5: rocks (3 stone colours) ----------
+const rockCol: RockColour = (q.get('rocks') as RockColour) ?? 'taupe';
+const rockCanvas = item('rocks', 5, ROCKS.name, `round, cushion moss, cracks; stone colours: ${Object.values(ROCKS.colourNames).join(', ')}`, ROCKS.how, `
+  <div class="ctl" style="margin-top:12px">Stone ${(Object.keys(ROCKS.colours) as RockColour[]).map((k) => `<a class="pill ${k === rockCol ? 'on' : ''}" href="?rocks=${k}#rocks">${ROCKS.colourNames[k]}</a>`).join('')}</div>
+  ${(Object.keys(ROCKS.colours) as RockColour[]).map((k) => `<h3>${ROCKS.colourNames[k]}</h3>${swatches([['Light', ROCKS.colours[k].light], ['Mid', ROCKS.colours[k].mid], ['Dark', ROCKS.colours[k].dark], ['Crack', ROCKS.colours[k].crack]])}`).join('')}
+  <h3>Moss and ink</h3>${swatches([...ROCKS.moss.map((h, i): [string, string] => [i === 0 ? 'Moss crevice' : i === ROCKS.moss.length - 1 ? 'Moss tips' : `Moss ${i + 1}`, h]), ['Ink line', ROCKS.ink]])}
+  <h3>Recipe</h3>${recipe([
+    ['Shape', `convex hull of ${ROCKS.shape.points} random points on a squashed ball (${ROCKS.shape.jitter * 100}% jitter), flat underneath`],
+    ['Stone', '3 flat tones by sun angle: light top, mid side, dark shade side'],
+    ['Cracks', 'noise contours on each face, only in some areas; dark crack + a thin light lip on the lit side'],
+    ['Moss', `cushion clumps (${ROCKS.mossDensity} per unit of area) where moss noise > 0: patchy, mostly on top, hanging over edges; darker deep down, lime at the sunny tips; a thin damp green rim and a shadow under the lip`],
+    ['Extras', 'pebbles around the bases; hand-drawn ink outline'],
+  ])}`);
+liveScene(rockCanvas, (_r, scene) => {
+  scene.background = new THREE.Color('#efe9df');
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(9, 48), new THREE.MeshBasicMaterial({ color: '#e4ddd1' })); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.001; scene.add(ground);
+  scene.add(new THREE.HemisphereLight('#fff6e8', '#7a7468', 1.3)); const sun = new THREE.DirectionalLight('#fff2dc', 1.8); sun.position.set(...(ROCKS.sun.map((v) => v * 10) as [number, number, number])); scene.add(sun);
+  const tick = buildRocks(scene, { colour: rockCol });
+  const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 60);
+  return { camera, tick: (t) => { tick(t); camera.position.set(0.4 + Math.sin(t * 0.25) * 1.2, 3.6, 8.6); camera.lookAt(0.3, 0.7, 0); } };
 });
 
 // ---------- render what's on screen ----------

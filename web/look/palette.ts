@@ -73,3 +73,22 @@ export const LEAVES = {
   sun: [-0.5, 0.7, 0.5] as [number, number, number],
 };
 export type LeafPalette = keyof typeof LEAVES.palettes;
+
+/** Approved 5: rocks. Round faceted boulders in 3 flat tones, cut-in cracks with a light lip, pebbles at the base,
+ *  and cushion moss: small puffy toon clumps where layered noise says moss grows (patchy, mostly on top, hanging over edges). */
+export const ROCKS = {
+  name: 'Rocks',
+  how: 'Round boulders with lots of small flat faces, lit in 3 flat tones (light top, mid side, dark shade side). Long wiggly cracks cut across some faces with a thin light lip on one side. Pebbles sit around the bases. Cushion moss grows where layered noise says so: patchy, mostly on top, hanging over the edges, made of small puffy toon clumps that are darker deep down and bright lime at the sunny tips, with a thin damp green rim on the stone. Three stone colours.',
+  shape: { points: 70, jitter: 0.05 },
+  colours: {
+    taupe: { light: '#b3aa9e', mid: '#8f877d', dark: '#625c56', crack: '#4a443f' },
+    slate: { light: '#9aa3ad', mid: '#77808c', dark: '#505864', crack: '#3a4049' },
+    sandstone: { light: '#d8b9a0', mid: '#b8957e', dark: '#86685a', crack: '#6a4e44' },
+  },
+  colourNames: { taupe: 'Warm taupe', slate: 'Cool slate', sandstone: 'Sandstone' },
+  ink: '#2a2521',
+  moss: ['#3f6a22', '#5f8f2a', '#86b83a', '#a8d44a', '#cde86a'],          // dark crevice -> sunny tips
+  mossDensity: 900,                                                        // clumps per unit of rock top area
+  sun: [-0.75, 0.55, 0.4] as [number, number, number],
+};
+export type RockColour = keyof typeof ROCKS.colours;
