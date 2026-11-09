@@ -12,32 +12,38 @@ export function addCreatures(scene: THREE.Scene, island: Island, focus: () => TH
   const open = (c: THREE.Vector2) => floorAt(c.x, GROUND_Y + 6, c.y) < GROUND_Y + 0.05;      // nothing (rock, tree) underneath
 
   function spawn(bytes: ArrayBuffer, name: string): void {
-    const model = creatureModel(bytes), colour = CREATURE.colours[n++ % CREATURE.colours.length], { mesh, tick } = creatureMesh(model, colour);
+    const model = creatureModel(bytes), colour = CREATURE.colours[n++ % CREATURE.colours.length], { mesh, tick, wake } = creatureMesh(model, colour);
     const body = new THREE.Group(), g = new THREE.Group(); body.add(mesh); g.add(body); scene.add(g); ticks.push(tick);
     // land on open ground near where you're looking
     const f = focus(); let start = onLand(f.x, f.z, 0.8);
     for (let i = 0; i < 40; i++) { const a = rnd() * 6.283, d = 0.5 + rnd() * (1 + i * 0.1), c = onLand(f.x + Math.cos(a) * d, f.z + Math.sin(a) * d, 0.8); if (open(c)) { start = c; break; } }
-    const s = { x: start.x, z: start.y, y: GROUND_Y + 4, vy: 0, facing: rnd() * 6.283, target: null as THREE.Vector2 | null, rest: 0.6, hopT: 0, landT: -9, last: -1, landed: false };
+    const s = { x: start.x, z: start.y, y: GROUND_Y + 4, vy: 0, facing: rnd() * 6.283, target: null as THREE.Vector2 | null, rest: 0.6, hopT: 0, landT: -9, last: -1, landed: false, wakeT: Infinity, awake: false };
     const spot = { x: s.x, z: s.z, r: 0 }; spots.push(spot);
     const pace = 1.4 / Math.sqrt(model.size.y / 0.6);                          // big creatures plod, small ones scurry
     console.info(`creature: ${name} ${model.mm.x.toFixed(0)}x${model.mm.y.toFixed(0)}x${model.mm.z.toFixed(0)} mm, ${model.tris} triangles, colour ${colour}`);
     ticks.push((t) => {
       const dt = s.last < 0 ? 0 : Math.min(0.05, t - s.last); s.last = t; if (dt <= 0) return;
-      let moving = false;
-      if (s.landed) {
+      let moving = false; const W = CREATURE.wake;
+      // waking up: lands grey and sits still, shivers, its colour climbs from the feet up, then a big stretch and a first hop
+      if (s.landed && s.wakeT === Infinity) s.wakeT = t + W.sleep + W.shiver;
+      if (!s.awake && t >= s.wakeT) { s.awake = true; wake(t); }
+      const sinceWake = t - s.wakeT, shiver = s.landed && sinceWake > -W.shiver && sinceWake < 0;
+      if (s.awake && sinceWake > W.sweep && s.hopT === 0 && s.vy === 0 && !s.target) { s.vy = 4.5; s.y += 0.01; s.hopT = 0.001; s.rest = 0.4; }   // first excited hop
+      if (s.landed && sinceWake > W.sweep + 0.6) {
         if (!s.target) { s.rest -= dt; if (s.rest < 0) { const a = rnd() * 6.283, d = 1 + rnd() * 3, c = onLand(s.x + Math.cos(a) * d, s.z + Math.sin(a) * d, 0.9); if (open(c)) s.target = c; else s.rest = 0.2; } }
         else { const dx = s.target.x - s.x, dz = s.target.y - s.z, d = Math.hypot(dx, dz);
           if (d < 0.1) { s.target = null; s.rest = 0.8 + rnd() * 2.5; }
           else { moving = true; s.x += (dx / d) * pace * dt; s.z += (dz / d) * pace * dt; s.facing = Math.atan2(dx, dz); s.hopT += dt * 3.2 * pace / 1.4; } }
       }
       const floor = floorAt(s.x, s.y, s.z);
-      if (s.y > floor + 0.01) { s.vy -= 14 * dt; s.y = Math.max(floor, s.y + s.vy * dt); if (s.y === floor) { if (!s.landed || s.vy < -3) s.landT = t; s.landed = true; s.vy = 0; } }
+      if (s.y > floor + 0.01 || s.vy > 0) { s.vy -= 14 * dt; s.y = Math.max(floor, s.y + s.vy * dt); if (s.y === floor) { if (!s.landed || s.vy < -3) s.landT = t; s.landed = true; s.vy = 0; } }
       else s.y += Math.min(floor - s.y, 3 * dt);
       // hop + squash while walking, a big squash when it lands from the sky, gentle breathing when resting
       const ph = s.hopT % 1, hop = moving ? 4 * ph * (1 - ph) * 0.18 * model.size.y : 0;
       const sq = (moving ? spring(s.hopT, 1, 22, 6) * 0.12 : 0) + (t - s.landT < 2 ? spring(t - s.landT, 99, 18, 5) * 0.35 : 0), br = 1 + Math.sin(t * 2.2 + n) * 0.03;
-      g.position.set(s.x, s.y, s.z); body.position.y = hop;
-      body.scale.set((1 + sq) / Math.sqrt(br), (1 - sq * 1.6) * br, (1 + sq) / Math.sqrt(br));
+      const breathe = s.awake ? br : 1, stretch = s.awake && sinceWake > W.sweep - 0.3 && sinceWake < W.sweep + 0.5 ? Math.sin(((sinceWake - W.sweep + 0.3) / 0.8) * Math.PI) * 0.22 : 0;
+      g.position.set(s.x + (shiver ? Math.sin(t * 90) * 0.03 : 0), s.y, s.z + (shiver ? Math.cos(t * 77) * 0.03 : 0)); body.position.y = hop;
+      body.scale.set((1 + sq - stretch * 0.4) / Math.sqrt(breathe), (1 - sq * 1.6 + stretch) * breathe, (1 + sq - stretch * 0.4) / Math.sqrt(breathe));
       g.rotation.y += ((s.facing - g.rotation.y + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       spot.x = s.x; spot.z = s.z; spot.r = s.y - floor < 0.6 ? Math.max(model.size.x, model.size.z) * 0.6 : 0;   // parts the grass once it's down
     });
