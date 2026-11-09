@@ -17,7 +17,7 @@ export function buildMushTree(scene: THREE.Scene, aspect: number): { camera: THR
 
   // ground: a dirt patch
   const dirt = new THREE.Mesh(new THREE.CircleGeometry(1, 64).scale(2.6, 1.3, 1), new THREE.MeshToonMaterial({ color: M.dirt, gradientMap: toonG }));
-  dirt.rotation.x = -Math.PI / 2; dirt.position.y = 0.01; dirt.receiveShadow = true; scene.add(dirt);
+  dirt.rotation.x = -Math.PI / 2; dirt.position.y = 0.01; dirt.receiveShadow = true; dirt.userData.base = true; scene.add(dirt);   // base: dropped when placed in a world
 
   // trunk: one twisting, tapering birch trunk with spiral grooves and short dark marks
   const barkMat = new THREE.MeshToonMaterial({ color: M.trunk.color, gradientMap: toonG });

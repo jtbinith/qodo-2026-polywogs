@@ -10,10 +10,12 @@ import { buildRocks } from '../look/rocks';
 import { buildMushTree } from '../look/mushtree';
 import { buildMushCoral } from '../look/mushcoral';
 import { buildShelf } from '../look/shelf';
+import { GROUND_Y, KINDS, buildIsland } from '../look/island';
+import { EXAMPLE_ISLAND } from '../island/layout';
 import { buildDream } from '../look/dream';
 import { celWater, type WaterOptions } from '../look/water';
 import { buildLeaves } from '../look/leaves';
-import { bands, outline, spring } from '../look/helpers';
+import { bands, cubeGeo, outline, spring } from '../look/helpers';
 import type { Tick } from '../look/helpers';
 
 const q = new URLSearchParams(location.search);
@@ -33,6 +35,7 @@ const GROUPS = {
   land: { title: 'Land & water', note: '' },
   plants: { title: 'Plants', note: '' },
   creatures: { title: 'Creatures', note: 'Nothing on its own yet. The toy-toon cube and ball are part of the dream meadow.' },
+  scenes: { title: 'Building a scene', note: '' },
 } as const;
 type Group = Exclude<keyof typeof GROUPS, 'palette'>;
 const root = document.getElementById('approved')!;
@@ -214,6 +217,39 @@ liveScene(shelfCanvas, (r, scene) => {
       seen.set(hex, { name, from: [it.dataset.title!] }); byGroup.set(grp, [...(byGroup.get(grp) ?? []), hex]); }); });
   document.querySelector('#g-palette .gitems')!.classList.add('master'); document.querySelector('#g-palette .gitems')!.innerHTML = [...byGroup].map(([grp, hexes]) => `<h3>${grp}</h3><div class="row">${hexes.map((h) => { const e = seen.get(h)!;
     return `<div class="sw" title="${e.from.join(', ')}"><div class="chip" style="background:${h}"></div><div class="meta"><b>${e.name}</b><span>${h}</span><i>${e.from.join(', ')}</i></div></div>`; }).join('')}</div>`).join(''); }
+
+// ---------- building a scene: the example island (how islands work) ----------
+const islandCanvas = item('island', 'scenes', 'Islands', 'how a scene is put together from the approved pieces',
+  'A small, flat island in the dream-meadow night, ringed by the approved sea, with approved things placed on it from a layout. The layout pins some things exactly where you want them and lets zones fill themselves from a seed, so the same layout gives the same island on every device and only the creatures need syncing.', `
+  <div class="ctl" style="margin-top:12px"><a class="pill on" href="../island/">Look around it</a><a class="pill" href="../island/?walker">Walk it as the cube</a><a class="pill" href="../island/?edit">Edit it</a></div>
+  <h3>How it works</h3>${recipe([
+    ['Layout', 'one small file (web/island/layout.ts): a seed, the island size, how much grass, a list of zones and a list of pinned things'],
+    ['Pinned', 'an exact spot: kind, x, z, and optionally turn and size. Use these for the things that matter, like the big tree by the shore'],
+    ['Zones', 'a circle with a name and "put this many of these in here", e.g. a mushroom grove with 4 shelf mushrooms. The seed picks the spots, keeping things spaced out, on land and clear of each other'],
+    ['Same everywhere', 'placement only uses the layout and the seed, so every device builds the identical island; nothing about the scenery is stored or sent'],
+    ['Editing', 'open the island with ?edit: drag things to move them, R to turn, + / - to resize, Delete to remove, buttons to add. "Copy layout" gives the new layout to paste into the file (everything becomes pinned)'],
+    ['Adding a new thing', `each approved builder is one line in KINDS (look/island.ts) with its size and how much room it needs; today: ${Object.values(KINDS).map((k) => k.label.toLowerCase()).join(', ')}`],
+    ['World', 'the dream meadow at night: its sky, fog, stars, moonlight, bloom and cream chalk lines on everything'],
+    ['Land', 'a ragged slab: the meadow\'s deep blue ground, a pale sandy shore, a slate cliff; the sea\'s rings roll in towards the shore'],
+    ['Meadow', 'the dream meadow\'s swaying brush cards and magenta paths, kept off the sand and out of ponds, thicker in zones that ask for it'],
+    ['Things', 'placed without their own bases (dirt patches, burnt-paper slabs) so they grow straight out of the meadow'],
+    ['Walking', 'the cube hops with WASD / arrows or goes where you tap, stands on whatever is under it, and scrambles up anything it walks into: rocks, trunks, mushrooms'],
+  ])}`);
+const islandTag = islandCanvas.closest('.item')!.querySelector('.tag')!; islandTag.textContent = 'Example'; shown--;   // a how-to, not an approved look
+liveScene(islandCanvas, (r, scene) => {
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = DREAM.render.exposure;
+  const isl = buildIsland(scene, EXAMPLE_ISLAND);
+  const cube = new THREE.Mesh(cubeGeo(0.6, 0.09, 16), new THREE.MeshToonMaterial({ color: DREAM.creatures.cube, gradientMap: bands(DREAM.toon.bands) }));
+  const ol = outline(cube.geometry, DREAM.ink.color, DREAM.ink.width, DREAM.ink.boil, false); cube.add(ol); cube.castShadow = true; scene.add(cube);
+  const camera = new THREE.PerspectiveCamera(36, W / H, 0.1, 200);
+  const composer = new EffectComposer(r); composer.setSize(W, H); composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), DREAM.render.bloom.strength, DREAM.render.bloom.radius, DREAM.render.bloom.threshold)); composer.addPass(new OutputPass());
+  return { camera, composer, tick: (t) => {
+    isl.tick(t); ol.material.uniforms.t.value = t;
+    const ph = (t * 1.2) % 1; cube.position.set(Math.cos(t * 0.35) * 1.2, GROUND_Y + 4 * ph * (1 - ph) * 0.3, Math.sin(t * 0.35) * 1.2); cube.rotation.y = -t * 0.35;   // a little lap round the middle
+    camera.position.set(Math.sin(t * 0.08) * 15, 10, Math.cos(t * 0.08) * 15); camera.lookAt(0, 0, 0);
+  } };
+});
 
 // ---------- render what's on screen ----------
 const io = new IntersectionObserver((es) => es.forEach((e) => { const l = lives.find((x) => x.canvas === e.target); if (l) l.visible = e.isIntersecting; }), { rootMargin: '200px' });

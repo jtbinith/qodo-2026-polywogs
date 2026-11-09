@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import { CEL_WATER as W } from './palette';
 import { NOISE, type Tick } from './helpers';
 
-export interface WaterOptions { rings?: boolean; sparkles?: boolean; shore?: boolean }
+export interface WaterOptions {
+  rings?: boolean; sparkles?: boolean; shore?: boolean;
+  inward?: boolean;                                        // rings travel in towards the middle (a sea around an island)
+  calm?: [number, number];                                 // a sea: from this distance to this one (world units from the middle) rings, sparkles and light patches die away
+  fog?: { color: string; near: number; far: number };     // fade into the night in 3 flat steps (no smooth gradient)
+}
 
 /** Polywogs water (approved): 2 flat colours from slow noise + noisy foam rings; ponds can add star sparkles + a sandy shore. */
 export function celWater(o: WaterOptions, width = 6, depth = 3.6): { mesh: THREE.Mesh; tick: Tick } {
@@ -12,30 +17,33 @@ export function celWater(o: WaterOptions, width = 6, depth = 3.6): { mesh: THREE
   const mat = new THREE.ShaderMaterial({
     uniforms: { t, deep: { value: new THREE.Color(W.deep) }, light: { value: new THREE.Color(W.light) }, foam: { value: new THREE.Color(W.foam) },
       spark: { value: new THREE.Color(W.sparkle) }, sand: { value: new THREE.Color(W.sand) }, halfSize: { value: new THREE.Vector2(width / 2, depth / 2) },
-      spacing: { value: W.rings.spacing }, speed: { value: W.rings.speed }, ringW: { value: W.rings.width },
-      uRings: { value: f(o.rings) }, uSpark: { value: f(o.sparkles) }, uShore: { value: f(o.shore) } },
+      spacing: { value: W.rings.spacing }, speed: { value: o.inward ? -W.rings.speed : W.rings.speed }, ringW: { value: W.rings.width },
+      uRings: { value: f(o.rings) }, uSpark: { value: f(o.sparkles) }, uShore: { value: f(o.shore) },
+      uCalm: { value: new THREE.Vector2(...(o.calm ?? [1e6, 2e6])) }, fogC: { value: new THREE.Color(o.fog?.color ?? '#000000') }, uFog: { value: new THREE.Vector3(o.fog?.near ?? 0, o.fog?.far ?? 0, o.fog ? 1 : 0) } },
     vertexShader: `varying vec3 vW; varying vec2 vL; void main(){ vL = position.xy; vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: NOISE + `uniform float t, spacing, speed, ringW, uRings, uSpark, uShore; uniform vec3 deep, light, foam, spark, sand; uniform vec2 halfSize; varying vec3 vW; varying vec2 vL;
+    fragmentShader: NOISE + `uniform float t, spacing, speed, ringW, uRings, uSpark, uShore; uniform vec3 deep, light, foam, spark, sand, fogC, uFog; uniform vec2 halfSize, uCalm; varying vec3 vW; varying vec2 vL;
       vec2 h2(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
       // a 4-pointed twinkle star
       float star(vec2 p, float r){ p = abs(p); return step(pow(p.x, .5) + pow(p.y, .5), r); }
       void main(){ vec2 p = vW.xz;
         float edgeR = length(vL / halfSize);                                         // 0 centre, 1 at the rim
-        float n = fbm(p * .9 + t * .1); vec3 c = n > .5 ? light : deep;          // approved: 2 flat colours from slow noise
+        float calm = smoothstep(uCalm.x, uCalm.y, length(p));                       // 0 near, 1 far out at sea
+        float n = fbm(p * .9 + t * .1); vec3 c = n > .5 + calm * .6 ? light : deep;          // approved: 2 flat colours from slow noise; far out the light patches thin away
         // foam rings; with noise they wobble, thicken, thin and break up like ripples
         vec2 rp = p * vec2(1., 1.6);
         if (uRings > .5) {
           float wob = (fbm(p * 1.4 + t * .2) - .5) * .55;
           float ring = fract(length(rp) * spacing + wob - t * speed);
           float wd = ringW * (1. + (fbm(p * 3. - t * .3) * 1.6 - .5));
-          if (ring < wd && step(.38, fbm(p * 2.2 + 7.)) > .5) c = foam; }
+          if (ring < wd && step(.38 + calm, fbm(p * 2.2 + 7.)) > .5) c = foam; }
         // shallow sandy edge with a soft foam line where water meets sand
         if (uShore > .5) { float sh = edgeR + (fbm(p * 1.5 + t * .1) - .5) * .12;
           if (sh > .86) c = mix(c, sand, .75); if (abs(sh - .86) < .018 + .01 * sin(t * 2. + p.x * 3.)) c = foam; }
         // twinkling star sparkles
         if (uSpark > .5) { vec2 g = floor(p * 2.2), fr = fract(p * 2.2) - .5; vec2 rnd = h2(g);
-          float on = step(.78, rnd.x) * (.5 + .5 * sin(t * (2. + rnd.y * 3.) + rnd.x * 30.));
+          float on = step(.78 + calm * .3, rnd.x) * (.5 + .5 * sin(t * (2. + rnd.y * 3.) + rnd.x * 30.));
           if (star((fr - (rnd - .5) * .5) * 1.8, .75 * on) > .5) c = spark; }
+        if (uFog.z > .5) { float fg = clamp((length(vW - cameraPosition) - uFog.x) / (uFog.y - uFog.x), 0., 1.); c = mix(c, fogC, floor(fg * 3.) / 3.); }   // 3 flat steps into the night
         gl_FragColor = vec4(c, 1.);
         #include <colorspace_fragment>
       }`,

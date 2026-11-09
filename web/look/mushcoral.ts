@@ -157,7 +157,7 @@ export function buildMushCoral(scene: THREE.Scene, aspect: number): { camera: TH
         c = mix(c, ${v3(M.base.rim)}, smoothstep(.94, .98, e));                                // deep coral rim
         diffuseColor.rgb = c;`);
     };
-    const base = inked(new THREE.Mesh(g, m), 0.012); base.receiveShadow = true; scene.add(base);
+    const base = inked(new THREE.Mesh(g, m), 0.012); base.receiveShadow = true; base.userData.base = true; scene.add(base);   // base: dropped when placed in a world
   }
 
 

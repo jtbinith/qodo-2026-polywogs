@@ -82,7 +82,7 @@ export function buildShelf(scene: THREE.Scene, aspect: number): { camera: THREE.
     const geo = new THREE.CircleGeometry(0.65, 48), p = geo.attributes.position;
     for (let i = 1; i < p.count; i++) { const a = Math.atan2(p.getY(i), p.getX(i)), k = 1 + 0.12 * Math.sin(a * 5 + 0.65 * 7) + 0.05 * Math.sin(a * 13); p.setXY(i, p.getX(i) * k, p.getY(i) * k * 0.8); }
     const m = new THREE.Mesh(geo, toon(S.patch.color)); m.rotation.x = -Math.PI / 2; m.position.y = 0.005; m.receiveShadow = true;
-    const rim = new THREE.Mesh(geo.clone().scale(1.08, 1.08, 1), toon(S.patch.rim)); rim.position.z = -0.002; m.add(rim); g.add(m);
+    const rim = new THREE.Mesh(geo.clone().scale(1.08, 1.08, 1), toon(S.patch.rim)); rim.position.z = -0.002; m.add(rim); m.userData.base = true; g.add(m);   // base: dropped when placed in a world
   }
   tick.push((t) => (g.rotation.z = Math.sin(t * 0.9) * 0.016));   // a gentle sway
 
