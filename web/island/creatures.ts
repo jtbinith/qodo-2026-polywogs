@@ -15,10 +15,12 @@ export function moveTuning(stats: Stats, height: number): { pace: number; hopHig
   return { pace: (1.4 / Math.sqrt(Math.max(0.05, height) / 0.6)) * lerp(MOVE.speed, stats.speed), hopHigh: lerp(MOVE.bounce, stats.bounce), stamina: lerp(MOVE.stamina, stats.stamina) };   // big ones plod, small ones scurry
 }
 /** Something on the ground with a size (a polywog's footprint). */
-export interface Body { x: number; z: number; r: number; landed: boolean; bumpT: number; target: THREE.Vector2 | null; rest: number; facing: number }
+export interface Body { x: number; z: number; r: number; landed: boolean; bumpT: number; target: THREE.Vector2 | null; rest: number; facing: number; moved?: () => void }
+/** Room between polywogs, as a share of their sizes: a bit more than touching, so the squash when they bump doesn't make them overlap. */
+export const BUMP_GAP = 1.1;
 /** If a and b overlap, move each half the overlap apart (along the line between them) and return true. */
 export function pushApart(a: Body, b: Body): boolean {
-  let dx = b.x - a.x, dz = b.z - a.z; const d = Math.hypot(dx, dz), reach = a.r + b.r;
+  let dx = b.x - a.x, dz = b.z - a.z; const d = Math.hypot(dx, dz), reach = (a.r + b.r) * BUMP_GAP;
   if (d >= reach) return false;
   if (d < 1e-6) { dx = 1; dz = 0; } else { dx /= d; dz /= d; }               // exactly on top of each other: split sideways
   const push = (reach - d) / 2; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; return true;
@@ -49,6 +51,7 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
     const s = { x: start.x, z: start.y, y: GROUND_Y + 4, vy: 0, facing: rnd() * 6.283, target: null as THREE.Vector2 | null, rest: 0.6, hopT: 0, landT: -9, last: -1, landed: false, wakeT: Infinity, awake: false, bumpT: -9, r: Math.max(model.size.x, model.size.z) * 0.5 };
     bodies.push(s);
     const spot = { x: s.x, z: s.z, r: 0 }; spots.push(spot);
+    (s as Body).moved = () => { g.position.x = s.x; g.position.z = s.z; spot.x = s.x; spot.z = s.z; };
     // its stats really change how it moves: Speed = how fast it walks, Bounce = how high it hops, Stamina = how far it goes before a rest
     const { pace, hopHigh, stamina } = moveTuning(stats, bodyHeight(model));
     console.info(`creature: ${name} ${model.mm.x.toFixed(0)}x${model.mm.y.toFixed(0)}x${model.mm.z.toFixed(0)} mm, ${model.tris} triangles, colour ${colour}`);
@@ -78,7 +81,8 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
         if (!s.target) { s.rest -= dt; if (s.rest < 0) { const a = rnd() * 6.283, d = (1 + rnd() * 3) * stamina, c = onLand(s.x + Math.cos(a) * d, s.z + Math.sin(a) * d, 0.9); if (open(c)) s.target = c; else s.rest = 0.2; } }
         else { const dx = s.target.x - s.x, dz = s.target.y - s.z, d = Math.hypot(dx, dz);
           if (d < 0.1) { s.target = null; s.rest = (0.8 + rnd() * 2.5) / stamina; }
-          else { moving = true; s.x += (dx / d) * pace * dt; s.z += (dz / d) * pace * dt; s.facing = Math.atan2(dx, dz); s.hopT += dt * 3.2 * pace / 1.4; } }
+          else { moving = true; const step = Math.min(pace * dt, d); s.x += (dx / d) * step; s.z += (dz / d) * step;   // never past the target, so fast ones don't jitter
+            s.facing = Math.atan2(dx, dz); s.hopT += dt * 3.2 * pace / 1.4; } }
       }
       const floor = floorAt(s.x, s.y, s.z);
       if (s.y > floor + 0.01 || s.vy > 0) { s.vy -= 14 * dt; s.y = Math.max(floor, s.y + s.vy * dt); if (s.y === floor) { if (!s.landed || s.vy < -3) s.landT = t; s.landed = true; s.vy = 0; } }
@@ -120,7 +124,8 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
   function collide(t: number): void {
     for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i], b = bodies[j], key = `${i}-${j}`; if (!a.landed || !b.landed) continue;
-      if (!pushApart(a, b)) { if (Math.hypot(a.x - b.x, a.z - b.z) > a.r + b.r + 0.2) touching.delete(key); continue; }
+      if (!pushApart(a, b)) { if (Math.hypot(a.x - b.x, a.z - b.z) > (a.r + b.r) * BUMP_GAP + 0.2) touching.delete(key); continue; }
+      for (const c of [a, b]) { const k = onLand(c.x, c.z, 0.8); c.x = k.x; c.z = k.y; c.moved?.(); }   // never pushed into the sea; drawn where it now is, this frame
       if (touching.has(key)) continue;                                        // still pressed together from last time: no new bump
       touching.add(key);
       for (const [me, other] of [[a, b], [b, a]] as [Body, Body][]) { me.bumpT = t; me.target = null; me.rest = 0.3; me.facing = Math.atan2(me.x - other.x, me.z - other.z); }
