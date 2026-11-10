@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moveTuning } from './creatures';
+import { moveTuning, pushApart, type Body } from './creatures';
 
 const base = { speed: 5, bounce: 5, stamina: 5 };
 describe('stats change how a polywog moves', () => {
@@ -11,4 +11,15 @@ describe('stats change how a polywog moves', () => {
     expect(moveTuning({ speed: 1, bounce: 1, stamina: 1 }, 2).pace).toBeGreaterThan(0);
     expect(Number.isFinite(moveTuning(base, 0).pace)).toBe(true); expect(moveTuning(base, 0).pace).toBeLessThan(10);
   });
+});
+
+describe('polywogs never walk through each other', () => {
+  const body = (x: number, z: number, r = 0.5): Body => ({ x, z, r, landed: true, bumpT: -9, target: null, rest: 0, facing: 0 });
+  it('two overlapping polywogs end up just touching', () => {
+    const a = body(0, 0), b = body(0.6, 0); expect(pushApart(a, b)).toBe(true);
+    expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeCloseTo(1, 6);
+  });
+  it('both move the same amount, in opposite directions', () => { const a = body(0, 0), b = body(0, 0.4); pushApart(a, b); expect(a.z).toBeCloseTo(-b.z + 0.4, 6); });
+  it('two exactly on top of each other still get split apart', () => { const a = body(1, 1), b = body(1, 1); pushApart(a, b); expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeCloseTo(1, 6); });
+  it('polywogs that are apart are left alone', () => { const a = body(0, 0), b = body(2, 0); expect(pushApart(a, b)).toBe(false); expect(a.x).toBe(0); expect(b.x).toBe(2); });
 });

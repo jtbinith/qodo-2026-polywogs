@@ -14,12 +14,22 @@ const lerp = ([lo, hi]: [number, number], stat: number) => lo + (stat / 10) * (h
 export function moveTuning(stats: Stats, height: number): { pace: number; hopHigh: number; stamina: number } {
   return { pace: (1.4 / Math.sqrt(Math.max(0.05, height) / 0.6)) * lerp(MOVE.speed, stats.speed), hopHigh: lerp(MOVE.bounce, stats.bounce), stamina: lerp(MOVE.stamina, stats.stamina) };   // big ones plod, small ones scurry
 }
+/** Something on the ground with a size (a polywog's footprint). */
+export interface Body { x: number; z: number; r: number; landed: boolean; bumpT: number; target: THREE.Vector2 | null; rest: number; facing: number }
+/** If a and b overlap, move each half the overlap apart (along the line between them) and return true. */
+export function pushApart(a: Body, b: Body): boolean {
+  let dx = b.x - a.x, dz = b.z - a.z; const d = Math.hypot(dx, dz), reach = a.r + b.r;
+  if (d >= reach) return false;
+  if (d < 1e-6) { dx = 1; dz = 0; } else { dx /= d; dz /= d; }               // exactly on top of each other: split sideways
+  const push = (reach - d) / 2; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; return true;
+}
 export const ANALYSE = { after: 0.7, think: 1.6, iconFor: 1.8, scans: 2 };   // seconds after the colour has climbed; scans down its body
 
 /** Drop a Tinkercad STL anywhere on the page (or use the button) and it lands on the island as a creature that wanders about. */
 export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: Island, focus: () => THREE.Vector3): Tick {
   const jobs: Job[] = [];   // every polywog's job so far, so a new one can see what the island needs
   const cards = makeCards();
+  const bodies: Body[] = [], touching = new Set<string>();   // every polywog on the island, for bumping into each other
   const ticks: Tick[] = [], spots: { x: number; z: number; r: number }[] = [], down = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);
   let n = 1, seed = 11; /* colour 0 is the toy cube's */ const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const floorAt = (x: number, y: number, z: number): number => { down.set(new THREE.Vector3(x, y + 0.4, z), DOWN); down.far = 40; return down.intersectObjects(island.solids(), false)[0]?.point.y ?? GROUND_Y; };
@@ -36,7 +46,8 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
     // land on open ground near where you're looking
     const f = focus(); let start = onLand(f.x, f.z, 0.8);
     for (let i = 0; i < 40; i++) { const a = rnd() * 6.283, d = 0.5 + rnd() * (1 + i * 0.1), c = onLand(f.x + Math.cos(a) * d, f.z + Math.sin(a) * d, 0.8); if (open(c)) { start = c; break; } }
-    const s = { x: start.x, z: start.y, y: GROUND_Y + 4, vy: 0, facing: rnd() * 6.283, target: null as THREE.Vector2 | null, rest: 0.6, hopT: 0, landT: -9, last: -1, landed: false, wakeT: Infinity, awake: false };
+    const s = { x: start.x, z: start.y, y: GROUND_Y + 4, vy: 0, facing: rnd() * 6.283, target: null as THREE.Vector2 | null, rest: 0.6, hopT: 0, landT: -9, last: -1, landed: false, wakeT: Infinity, awake: false, bumpT: -9, r: Math.max(model.size.x, model.size.z) * 0.5 };
+    bodies.push(s);
     const spot = { x: s.x, z: s.z, r: 0 }; spots.push(spot);
     // its stats really change how it moves: Speed = how fast it walks, Bounce = how high it hops, Stamina = how far it goes before a rest
     const { pace, hopHigh, stamina } = moveTuning(stats, bodyHeight(model));
@@ -74,7 +85,7 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
       else s.y += Math.min(floor - s.y, 3 * dt);
       // hop + squash while walking, a big squash when it lands from the sky, gentle breathing when resting
       const ph = s.hopT % 1, hop = moving ? 4 * ph * (1 - ph) * 0.18 * hopHigh * bodyHeight(model) : 0;
-      const sq = (moving ? spring(s.hopT, 1, 22, 6) * 0.12 : 0) + (t - s.landT < 2 ? spring(t - s.landT, 99, 18, 5) * 0.35 : 0), br = 1 + Math.sin(t * 2.2 + n) * 0.03;
+      const sq = (moving ? spring(s.hopT, 1, 22, 6) * 0.12 : 0) + (t - s.landT < 2 ? spring(t - s.landT, 99, 18, 5) * 0.35 : 0) + (t - s.bumpT < 1.2 ? spring(t - s.bumpT, 99, 22, 6) * 0.18 : 0), br = 1 + Math.sin(t * 2.2 + n) * 0.03;
       const breathe = s.awake ? br : 1, stretch = s.awake && sinceWake > W.sweep - 0.3 && sinceWake < W.sweep + 0.5 ? Math.sin(((sinceWake - W.sweep + 0.3) / 0.8) * Math.PI) * 0.22 : 0;
       g.position.set(s.x + (shiver ? Math.sin(t * 90) * 0.03 : 0), s.y, s.z + (shiver ? Math.cos(t * 77) * 0.03 : 0)); body.position.y = hop;
       body.scale.set((1 + sq - stretch * 0.4) / Math.sqrt(breathe), (1 - sq * 1.6 + stretch) * breathe, (1 + sq - stretch * 0.4) / Math.sqrt(breathe));
@@ -105,5 +116,16 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
   btn.innerHTML = '+ Add a Tinkercad model <input type="file" accept=".stl" multiple hidden>';
   btn.querySelector('input')!.addEventListener('change', (e) => { const inp = e.target as HTMLInputElement; read(inp.files); inp.value = ''; });   // so the same file can be added again
   document.body.appendChild(btn);
-  return (t) => { ticks.forEach((f) => f(t)); island.partGrass(spots); };
+  /** Bumping: polywogs never overlap. Two that meet get pushed apart, squash, turn away and head off somewhere new. */
+  function collide(t: number): void {
+    for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) {
+      const a = bodies[i], b = bodies[j], key = `${i}-${j}`; if (!a.landed || !b.landed) continue;
+      if (!pushApart(a, b)) { if (Math.hypot(a.x - b.x, a.z - b.z) > a.r + b.r + 0.2) touching.delete(key); continue; }
+      if (touching.has(key)) continue;                                        // still pressed together from last time: no new bump
+      touching.add(key);
+      for (const [me, other] of [[a, b], [b, a]] as [Body, Body][]) { me.bumpT = t; me.target = null; me.rest = 0.3; me.facing = Math.atan2(me.x - other.x, me.z - other.z); }
+    }
+  }
+  if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __polywogs: Body[] }).__polywogs = bodies;   // ?debug: lets browser tests see where polywogs are
+  return (t) => { ticks.forEach((f) => f(t)); collide(t); island.partGrass(spots); };
 }
