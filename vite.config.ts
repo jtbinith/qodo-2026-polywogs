@@ -7,5 +7,5 @@ export default defineConfig({
   root: 'web',
   base: './',
   server: { host: '127.0.0.1', port: 5195, strictPort: true },
-  build: { outDir: '../dist', emptyOutDir: true, rollupOptions: { input: { guide: here('web/guide/index.html'), try: here('web/guide/try.html'), island: here('web/island/index.html') } } },
+  build: { outDir: '../dist', emptyOutDir: true, rollupOptions: { input: { home: here('web/index.html'), guide: here('web/guide/index.html'), try: here('web/guide/try.html'), island: here('web/island/index.html') } } },
 });
