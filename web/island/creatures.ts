@@ -2,11 +2,18 @@ import * as THREE from 'three';
 import { GROUND_Y, type Island } from '../look/island';
 import { CREATURE, bodyHeight, creatureMesh, creatureModel } from '../look/creature';
 import { spring, type Tick } from '../look/helpers';
-import { jobFor, measure, statsFor, type Job } from '../look/roles';
+import { jobFor, measure, statsFor, type Job, type Stats } from '../look/roles';
 import { cleanName, makeCards } from './cards';
 import { makeBubble } from '../look/bubbles';
 
 /** After waking up, a polywog stops to work out what it is: a thought bubble and a scan, then its job icon pops up, then it sets off. */
+/** How much each stat changes movement: the multiplier at stat 0 and at stat 10. */
+export const MOVE = { speed: [0.55, 1.6] as [number, number], bounce: [0.3, 2.0] as [number, number], stamina: [0.5, 1.7] as [number, number] };
+const lerp = ([lo, hi]: [number, number], stat: number) => lo + (stat / 10) * (hi - lo);
+/** Walking pace (units/s), hop height (x body height) and stamina (x trip length; rests are shorter) for a polywog's stats. */
+export function moveTuning(stats: Stats, height: number): { pace: number; hopHigh: number; stamina: number } {
+  return { pace: (1.4 / Math.sqrt(Math.max(0.05, height) / 0.6)) * lerp(MOVE.speed, stats.speed), hopHigh: lerp(MOVE.bounce, stats.bounce), stamina: lerp(MOVE.stamina, stats.stamina) };   // big ones plod, small ones scurry
+}
 export const ANALYSE = { after: 0.7, think: 1.6, iconFor: 1.8, scans: 2 };   // seconds after the colour has climbed; scans down its body
 
 /** Drop a Tinkercad STL anywhere on the page (or use the button) and it lands on the island as a creature that wanders about. */
@@ -22,7 +29,7 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
   function spawn(bytes: ArrayBuffer, name: string): void {
     const model = creatureModel(bytes), colour = CREATURE.colours[n++ % CREATURE.colours.length], { mesh, tick, wake } = creatureMesh(model, colour);
     const body = new THREE.Group(), g = new THREE.Group(); body.add(mesh); g.add(body); scene.add(g); ticks.push(tick);
-    const shape = measure(model.geo), head = new THREE.Object3D(); head.position.y = model.size.y + 0.1; g.add(head); const bubble = makeBubble(head, camera);
+    const shape = measure(model.geo), stats = statsFor(shape), head = new THREE.Object3D(); head.position.y = model.size.y + 0.1; g.add(head); const bubble = makeBubble(head, camera);
     const reach = Math.max(model.size.x, model.size.z) * 0.62, scan = new THREE.Mesh(new THREE.RingGeometry(reach * 0.92, reach, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#fff6e6', transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
     scan.visible = false; g.add(scan);
     let job: Job | null = null, hideAt = 0;
@@ -31,7 +38,8 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
     for (let i = 0; i < 40; i++) { const a = rnd() * 6.283, d = 0.5 + rnd() * (1 + i * 0.1), c = onLand(f.x + Math.cos(a) * d, f.z + Math.sin(a) * d, 0.8); if (open(c)) { start = c; break; } }
     const s = { x: start.x, z: start.y, y: GROUND_Y + 4, vy: 0, facing: rnd() * 6.283, target: null as THREE.Vector2 | null, rest: 0.6, hopT: 0, landT: -9, last: -1, landed: false, wakeT: Infinity, awake: false };
     const spot = { x: s.x, z: s.z, r: 0 }; spots.push(spot);
-    const pace = 1.4 / Math.sqrt(bodyHeight(model) / 0.6);                     // big creatures plod, small ones scurry
+    // its stats really change how it moves: Speed = how fast it walks, Bounce = how high it hops, Stamina = how far it goes before a rest
+    const { pace, hopHigh, stamina } = moveTuning(stats, bodyHeight(model));
     console.info(`creature: ${name} ${model.mm.x.toFixed(0)}x${model.mm.y.toFixed(0)}x${model.mm.z.toFixed(0)} mm, ${model.tris} triangles, colour ${colour}`);
     ticks.push((t) => {
       const dt = s.last < 0 ? 0 : Math.min(0.05, t - s.last); s.last = t; if (dt <= 0) return;
@@ -48,7 +56,7 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
       else scan.visible = false;
       if (s.awake && sinceA >= A.think && !job) {
         job = jobFor(shape, jobs); const slot = jobs.push(job) - 1; bubble.show(job, t); console.info(`polywog: ${name} is a ${job}`);
-        cards.add({ name: cleanName(name), job, stats: statsFor(shape), colour, geo: model.geo, size: model.size, stl: bytes,
+        cards.add({ name: cleanName(name), job, stats, colour, geo: model.geo, size: model.size, stl: bytes,
           setJob: (j) => { job = j; jobs[slot] = j; bubble.show(j, s.last); hideAt = s.last + A.iconFor; },     // the kid changed it: show the new icon over its head
           rename: () => {} });
       }
@@ -56,16 +64,16 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
       if (job && sinceA >= A.think + A.iconFor && sinceA < A.think + A.iconFor + dt * 1.5) bubble.show(null, t);
       bubble.tick(t);
       if (s.landed && job && sinceA > A.think + 0.6) {
-        if (!s.target) { s.rest -= dt; if (s.rest < 0) { const a = rnd() * 6.283, d = 1 + rnd() * 3, c = onLand(s.x + Math.cos(a) * d, s.z + Math.sin(a) * d, 0.9); if (open(c)) s.target = c; else s.rest = 0.2; } }
+        if (!s.target) { s.rest -= dt; if (s.rest < 0) { const a = rnd() * 6.283, d = (1 + rnd() * 3) * stamina, c = onLand(s.x + Math.cos(a) * d, s.z + Math.sin(a) * d, 0.9); if (open(c)) s.target = c; else s.rest = 0.2; } }
         else { const dx = s.target.x - s.x, dz = s.target.y - s.z, d = Math.hypot(dx, dz);
-          if (d < 0.1) { s.target = null; s.rest = 0.8 + rnd() * 2.5; }
+          if (d < 0.1) { s.target = null; s.rest = (0.8 + rnd() * 2.5) / stamina; }
           else { moving = true; s.x += (dx / d) * pace * dt; s.z += (dz / d) * pace * dt; s.facing = Math.atan2(dx, dz); s.hopT += dt * 3.2 * pace / 1.4; } }
       }
       const floor = floorAt(s.x, s.y, s.z);
       if (s.y > floor + 0.01 || s.vy > 0) { s.vy -= 14 * dt; s.y = Math.max(floor, s.y + s.vy * dt); if (s.y === floor) { if (!s.landed || s.vy < -3) s.landT = t; s.landed = true; s.vy = 0; } }
       else s.y += Math.min(floor - s.y, 3 * dt);
       // hop + squash while walking, a big squash when it lands from the sky, gentle breathing when resting
-      const ph = s.hopT % 1, hop = moving ? 4 * ph * (1 - ph) * 0.18 * bodyHeight(model) : 0;
+      const ph = s.hopT % 1, hop = moving ? 4 * ph * (1 - ph) * 0.18 * hopHigh * bodyHeight(model) : 0;
       const sq = (moving ? spring(s.hopT, 1, 22, 6) * 0.12 : 0) + (t - s.landT < 2 ? spring(t - s.landT, 99, 18, 5) * 0.35 : 0), br = 1 + Math.sin(t * 2.2 + n) * 0.03;
       const breathe = s.awake ? br : 1, stretch = s.awake && sinceWake > W.sweep - 0.3 && sinceWake < W.sweep + 0.5 ? Math.sin(((sinceWake - W.sweep + 0.3) / 0.8) * Math.PI) * 0.22 : 0;
       g.position.set(s.x + (shiver ? Math.sin(t * 90) * 0.03 : 0), s.y, s.z + (shiver ? Math.cos(t * 77) * 0.03 : 0)); body.position.y = hop;
