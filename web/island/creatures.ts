@@ -14,6 +14,11 @@ const lerp = ([lo, hi]: [number, number], stat: number) => lo + (stat / 10) * (h
 export function moveTuning(stats: Stats, height: number): { pace: number; hopHigh: number; stamina: number } {
   return { pace: (1.4 / Math.sqrt(Math.max(0.05, height) / 0.6)) * lerp(MOVE.speed, stats.speed), hopHigh: lerp(MOVE.bounce, stats.bounce), stamina: lerp(MOVE.stamina, stats.stamina) };   // big ones plod, small ones scurry
 }
+/** Where a polywog is in working out its job, by seconds since its colour finished climbing (minus the pause). It only sets off once
+ *  the job icon has had its full time on screen. */
+export function revealPhase(sinceA: number): 'waking' | 'thinking' | 'showing job' | 'free' {
+  const A = ANALYSE; return sinceA < 0 ? 'waking' : sinceA < A.think ? 'thinking' : sinceA < A.think + A.iconFor ? 'showing job' : 'free';
+}
 /** Something on the ground with a size (a polywog's footprint). */
 export interface Body { x: number; z: number; r: number; landed: boolean; bumpT: number; target: THREE.Vector2 | null; rest: number; facing: number; moved?: () => void }
 /** Room between polywogs, as a share of their sizes: a bit more than touching, so the squash when they bump doesn't make them overlap. */
@@ -69,15 +74,14 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
         const u = (sinceA / A.think) * A.scans % 1; scan.visible = true; scan.position.y = model.size.y * (1 - u) + 0.02; }
       else scan.visible = false;
       if (s.awake && sinceA >= A.think && !job) {
-        job = jobFor(shape, jobs); const slot = jobs.push(job) - 1; bubble.show(job, t); console.info(`polywog: ${name} is a ${job}`);
+        job = jobFor(shape, jobs); const slot = jobs.push(job) - 1; bubble.show(job, t); hideAt = t + A.iconFor; console.info(`polywog: ${name} is a ${job}`);
         cards.add({ name: cleanName(name), job, stats, colour, geo: model.geo, size: model.size, stl: bytes,
           setJob: (j) => { job = j; jobs[slot] = j; bubble.show(j, s.last); hideAt = s.last + A.iconFor; },     // the kid changed it: show the new icon over its head
           rename: () => {} });
       }
       if (hideAt && t > hideAt) { hideAt = 0; bubble.show(null, t); }
-      if (job && sinceA >= A.think + A.iconFor && sinceA < A.think + A.iconFor + dt * 1.5) bubble.show(null, t);
       bubble.tick(t);
-      if (s.landed && job && sinceA > A.think + 0.6) {
+      if (s.landed && job && revealPhase(sinceA) === 'free') {
         if (!s.target) { s.rest -= dt; if (s.rest < 0) { const a = rnd() * 6.283, d = (1 + rnd() * 3) * stamina, c = onLand(s.x + Math.cos(a) * d, s.z + Math.sin(a) * d, 0.9); if (open(c)) s.target = c; else s.rest = 0.2; } }
         else { const dx = s.target.x - s.x, dz = s.target.y - s.z, d = Math.hypot(dx, dz);
           if (d < 0.1) { s.target = null; s.rest = (0.8 + rnd() * 2.5) / stamina; }
