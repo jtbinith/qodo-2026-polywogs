@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GROUND_Y, type Island } from '../look/island';
 import { CREATURE, bodyHeight, creatureMesh, creatureModel } from '../look/creature';
 import { spring, type Tick } from '../look/helpers';
-import { jobFor, measure, type Job } from '../look/roles';
+import { jobFor, measure, statsFor, type Job } from '../look/roles';
+import { cleanName, makeCards } from './cards';
 import { makeBubble } from '../look/bubbles';
 
 /** After waking up, a polywog stops to work out what it is: a thought bubble and a scan, then its job icon pops up, then it sets off. */
@@ -11,6 +12,7 @@ export const ANALYSE = { after: 0.7, think: 1.6, iconFor: 1.8, scans: 2 };   // 
 /** Drop a Tinkercad STL anywhere on the page (or use the button) and it lands on the island as a creature that wanders about. */
 export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: Island, focus: () => THREE.Vector3): Tick {
   const jobs: Job[] = [];   // every polywog's job so far, so a new one can see what the island needs
+  const cards = makeCards();
   const ticks: Tick[] = [], spots: { x: number; z: number; r: number }[] = [], down = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);
   let n = 1, seed = 11; /* colour 0 is the toy cube's */ const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const floorAt = (x: number, y: number, z: number): number => { down.set(new THREE.Vector3(x, y + 0.4, z), DOWN); down.far = 40; return down.intersectObjects(island.solids(), false)[0]?.point.y ?? GROUND_Y; };
@@ -23,7 +25,7 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
     const shape = measure(model.geo), head = new THREE.Object3D(); head.position.y = model.size.y + 0.1; g.add(head); const bubble = makeBubble(head, camera);
     const reach = Math.max(model.size.x, model.size.z) * 0.62, scan = new THREE.Mesh(new THREE.RingGeometry(reach * 0.92, reach, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#fff6e6', transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
     scan.visible = false; g.add(scan);
-    let job: Job | null = null;
+    let job: Job | null = null, hideAt = 0;
     // land on open ground near where you're looking
     const f = focus(); let start = onLand(f.x, f.z, 0.8);
     for (let i = 0; i < 40; i++) { const a = rnd() * 6.283, d = 0.5 + rnd() * (1 + i * 0.1), c = onLand(f.x + Math.cos(a) * d, f.z + Math.sin(a) * d, 0.8); if (open(c)) { start = c; break; } }
@@ -44,7 +46,13 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
       if (s.awake && sinceA >= 0 && sinceA < A.think) { if (sinceA < dt * 1.5) bubble.show('think', t);
         const u = (sinceA / A.think) * A.scans % 1; scan.visible = true; scan.position.y = model.size.y * (1 - u) + 0.02; }
       else scan.visible = false;
-      if (s.awake && sinceA >= A.think && !job) { job = jobFor(shape, jobs); jobs.push(job); bubble.show(job, t); console.info(`polywog: ${name} is a ${job}`); }
+      if (s.awake && sinceA >= A.think && !job) {
+        job = jobFor(shape, jobs); const slot = jobs.push(job) - 1; bubble.show(job, t); console.info(`polywog: ${name} is a ${job}`);
+        cards.add({ name: cleanName(name), job, stats: statsFor(shape), colour, geo: model.geo, size: model.size, stl: bytes,
+          setJob: (j) => { job = j; jobs[slot] = j; bubble.show(j, s.last); hideAt = s.last + A.iconFor; },     // the kid changed it: show the new icon over its head
+          rename: () => {} });
+      }
+      if (hideAt && t > hideAt) { hideAt = 0; bubble.show(null, t); }
       if (job && sinceA >= A.think + A.iconFor && sinceA < A.think + A.iconFor + dt * 1.5) bubble.show(null, t);
       bubble.tick(t);
       if (s.landed && job && sinceA > A.think + 0.6) {
