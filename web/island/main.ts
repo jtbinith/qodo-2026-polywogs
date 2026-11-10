@@ -48,7 +48,7 @@ if (look) { camera.position.set(0, GROUND_Y + (WALKER ? 6.5 : 8), WALKER ? 8.5 :
   Object.assign(look, { enablePan: !WALKER, screenSpacePanning: false, enableDamping: true, minDistance: 2.5, maxDistance: 30, maxPolarAngle: 1.45 }); look.update(); }
 
 // drop a Tinkercad STL on the page and it lands as a creature where you're looking (or near the cube with ?walker)
-if (!EDIT) ticks.push(addCreatures(scene, island, () => (WALKER || !look ? cube.position : look.target)));
+if (!EDIT) ticks.push(addCreatures(scene, camera, island, () => (WALKER || !look ? cube.position : look.target)));
 
 // climbing: stand on whatever is underneath; push into something and the cube scrambles up it
 const down = new THREE.Raycaster(), ahead = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);

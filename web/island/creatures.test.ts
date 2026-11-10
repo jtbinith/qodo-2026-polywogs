@@ -1,0 +1,35 @@
+import { describe, expect, it } from 'vitest';
+import { ANALYSE, BUMP_GAP, moveTuning, pushApart, revealPhase, type Body } from './creatures';
+
+const base = { speed: 5, bounce: 5, stamina: 5 };
+describe('stats change how a polywog moves', () => {
+  it('more Speed walks faster', () => expect(moveTuning({ ...base, speed: 9 }, 1).pace).toBeGreaterThan(moveTuning({ ...base, speed: 2 }, 1).pace));
+  it('more Bounce hops higher', () => expect(moveTuning({ ...base, bounce: 9 }, 1).hopHigh).toBeGreaterThan(moveTuning({ ...base, bounce: 2 }, 1).hopHigh));
+  it('more Stamina goes further before resting', () => expect(moveTuning({ ...base, stamina: 9 }, 1).stamina).toBeGreaterThan(moveTuning({ ...base, stamina: 2 }, 1).stamina));
+  it('bigger polywogs plod, at the same Speed', () => expect(moveTuning(base, 2).pace).toBeLessThan(moveTuning(base, 0.6).pace));
+  it('even the slowest polywog still moves, and a zero height cannot make it race', () => {
+    expect(moveTuning({ speed: 1, bounce: 1, stamina: 1 }, 2).pace).toBeGreaterThan(0);
+    expect(Number.isFinite(moveTuning(base, 0).pace)).toBe(true); expect(moveTuning(base, 0).pace).toBeLessThan(10);
+  });
+});
+
+describe('polywogs never walk through each other', () => {
+  const body = (x: number, z: number, r = 0.5): Body => ({ x, z, r, landed: true, bumpT: -9, target: null, rest: 0, facing: 0 });
+  it('two overlapping polywogs end up a little more than touching', () => {
+    const a = body(0, 0), b = body(0.6, 0); expect(pushApart(a, b)).toBe(true);
+    expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeCloseTo(1 * BUMP_GAP, 6);
+  });
+  it('both move the same amount, in opposite directions', () => { const a = body(0, 0), b = body(0, 0.4); pushApart(a, b); expect(-a.z).toBeCloseTo(b.z - 0.4, 6); });
+  it('two exactly on top of each other still get split apart', () => { const a = body(1, 1), b = body(1, 1); pushApart(a, b); expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeCloseTo(BUMP_GAP, 6); });
+  it('polywogs that are apart are left alone', () => { const a = body(0, 0), b = body(2, 0); expect(pushApart(a, b)).toBe(false); expect(a.x).toBe(0); expect(b.x).toBe(2); });
+});
+
+describe('a new polywog works out its job before it sets off', () => {
+  it('goes waking, thinking, showing its job, then free, in that order', () => {
+    expect(revealPhase(-0.1)).toBe('waking'); expect(revealPhase(0.1)).toBe('thinking');
+    expect(revealPhase(ANALYSE.think + 0.1)).toBe('showing job'); expect(revealPhase(ANALYSE.think + ANALYSE.iconFor + 0.01)).toBe('free');
+  });
+  it('never sets off while its job icon is still showing', () => {
+    for (let t = ANALYSE.think; t < ANALYSE.think + ANALYSE.iconFor; t += 0.05) expect(revealPhase(t)).not.toBe('free');
+  });
+});

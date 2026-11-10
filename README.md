@@ -38,7 +38,7 @@ Built for the Qodo "Build a Software Factory in 30 Days" hackathon. Every pull r
 
 ## Run it
 
-Needs Node 25.
+Needs Node 24 (LTS) or 22.12+.
 
 ```
 npm install
