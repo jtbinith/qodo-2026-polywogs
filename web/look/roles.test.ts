@@ -22,6 +22,10 @@ describe('stats from shape', () => {
     expect(jobFor(measure(new THREE.BoxGeometry(3, 0.4, 0.4)))).toBe('courier'); expect(jobFor(measure(new THREE.BoxGeometry(3, 1.6, 1.6)))).toBe('courier');
     expect(slim.speed).toBeGreaterThan(stubby.speed);
   });
+  it('a ball bounces more than a block or a cone', () => {
+    const ball = statsFor(measure(new THREE.SphereGeometry(0.5, 32, 16))).bounce;
+    expect(ball).toBeGreaterThan(statsFor(measure(new THREE.BoxGeometry(1, 1, 1))).bounce); expect(ball).toBeGreaterThan(statsFor(measure(new THREE.ConeGeometry(0.5, 1, 32))).bounce);
+  });
   it('a solid block has more stamina than an airy cone', () =>
     expect(statsFor(measure(new THREE.BoxGeometry(1, 1, 1))).stamina).toBeGreaterThan(statsFor(measure(new THREE.ConeGeometry(0.5, 1, 32))).stamina));
   it('the same model always gets the same result', () => {

@@ -8,7 +8,7 @@ import { makeBubble } from '../look/bubbles';
 
 /** After waking up, a polywog stops to work out what it is: a thought bubble and a scan, then its job icon pops up, then it sets off. */
 /** How much each stat changes movement: the multiplier at stat 0 and at stat 10. */
-export const MOVE = { speed: [0.55, 1.6] as [number, number], bounce: [0.3, 2.0] as [number, number], stamina: [0.5, 1.7] as [number, number] };
+export const MOVE = { speed: [0.4, 2.2] as [number, number], bounce: [0.15, 3.2] as [number, number], stamina: [0.4, 2.0] as [number, number] };
 const lerp = ([lo, hi]: [number, number], stat: number) => lo + (stat / 10) * (hi - lo);
 /** Walking pace (units/s), hop height (x body height) and stamina (x trip length; rests are shorter) for a polywog's stats. */
 export function moveTuning(stats: Stats, height: number): { pace: number; hopHigh: number; stamina: number } {
@@ -85,7 +85,7 @@ export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: I
       else s.y += Math.min(floor - s.y, 3 * dt);
       // hop + squash while walking, a big squash when it lands from the sky, gentle breathing when resting
       const ph = s.hopT % 1, hop = moving ? 4 * ph * (1 - ph) * 0.18 * hopHigh * bodyHeight(model) : 0;
-      const sq = (moving ? spring(s.hopT, 1, 22, 6) * 0.12 : 0) + (t - s.landT < 2 ? spring(t - s.landT, 99, 18, 5) * 0.35 : 0) + (t - s.bumpT < 1.2 ? spring(t - s.bumpT, 99, 22, 6) * 0.18 : 0), br = 1 + Math.sin(t * 2.2 + n) * 0.03;
+      const sq = (moving ? spring(s.hopT, 1, 22, 6) * 0.12 * Math.sqrt(hopHigh) : 0) + (t - s.landT < 2 ? spring(t - s.landT, 99, 18, 5) * 0.35 : 0) + (t - s.bumpT < 1.2 ? spring(t - s.bumpT, 99, 22, 6) * 0.18 : 0), br = 1 + Math.sin(t * 2.2 + n) * 0.03;
       const breathe = s.awake ? br : 1, stretch = s.awake && sinceWake > W.sweep - 0.3 && sinceWake < W.sweep + 0.5 ? Math.sin(((sinceWake - W.sweep + 0.3) / 0.8) * Math.PI) * 0.22 : 0;
       g.position.set(s.x + (shiver ? Math.sin(t * 90) * 0.03 : 0), s.y, s.z + (shiver ? Math.cos(t * 77) * 0.03 : 0)); body.position.y = hop;
       body.scale.set((1 + sq - stretch * 0.4) / Math.sqrt(breathe), (1 - sq * 1.6 + stretch) * breathe, (1 + sq - stretch * 0.4) / Math.sqrt(breathe));

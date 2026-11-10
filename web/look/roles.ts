@@ -75,12 +75,15 @@ export function jobFor(s: Shape, island: Job[] = []): Job {
 }
 
 const stat = (v: number) => Math.max(1, Math.min(10, Math.round(1 + clamp01(v) * 9)));
-/** Speed: long, slim and small is fast. Bounce: light (airy) and round bounces. Stamina: solid and chunky keeps going. */
+/** Speed: long, slim, small and airy is fast. Bounce: ball-shaped bounces best. Stamina: solid keeps going.
+ *  Weighted so that models of the same size still spread out (a solid cylinder, a ball and a cone come out clearly different). */
 export function statsFor(s: Shape): Stats {
-  const small = 1 - clamp01((s.size - 0.5) / 1.5);
+  const small = 1 - clamp01((s.size - 0.5) / 1.5), airy = clamp01(1 - s.fill), round = 1 - clamp01(s.pointy * 2);
+  // how ball-like: as full as a ball (a ball fills about 52% of its box), smooth, and as wide as it is long and tall
+  const ball = clamp01(1.3 * clamp01(1 - Math.abs(s.fill - 0.52) * 3) * round * clamp01(2 - s.long) * clamp01(s.flat));
   return {
-    speed: stat(0.25 + 0.45 * clamp01((s.long - 1) / 1.5) + 0.3 * small - 0.2 * s.fill),
-    bounce: stat(0.15 + 0.55 * (1 - s.fill) + 0.3 * (1 - clamp01(s.pointy * 2))),
-    stamina: stat(0.1 + 0.7 * s.fill + 0.2 * clamp01(s.flat)),
+    speed: stat(0.1 + 0.4 * clamp01((s.long - 1) / 1.5) + 0.25 * small + 0.65 * airy),
+    bounce: stat(0.05 + 0.25 * airy + 0.75 * ball),                             // balls bounce best
+    stamina: stat(0.05 + 0.85 * clamp01(s.fill) + 0.1 * clamp01(s.flat)),
   };
 }
