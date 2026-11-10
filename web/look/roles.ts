@@ -22,9 +22,9 @@ export interface Shape {
 export interface Stats { speed: number; bounce: number; stamina: number }   // 1..10 each; all three change how it moves today
 
 /** How much of its box a model fills, 0..1, by sampling inside it rather than adding up triangle volumes.
- *  Each separate part (Tinkercad keeps grouped shapes as their own shells) is tested on its own with rays straight up through
- *  a grid of columns: crossings in and out don't depend on which way a facet faces, so reversed facets don't matter, and a point
- *  inside any part counts once, so overlapping parts aren't counted twice.
+ *  Rays go straight up through a grid of columns, adding 1 going into a surface and taking 1 away coming out: anywhere the count
+ *  is above zero is inside something, so overlapping or duplicated parts count once (their union), whatever corners they share.
+ *  Each separate part's direction is checked by its volume, so a part with its facets reversed (inside out) still counts properly.
  *  Memory grows only with real crossings, and the work is capped by a budget (a coarser grid for heavy models), so any accepted
  *  file measures in bounded time. */
 export const FILL = {
@@ -44,7 +44,11 @@ export function fillOf(g: THREE.BufferGeometry, box: THREE.Box3): number {
     const key = (q(p.getX(v), box.min.x, size.x) * 131072 + q(p.getY(v), box.min.y, size.y)) * 131072 + q(p.getZ(v), box.min.z, size.z), o = corner.get(key);
     if (o === undefined) corner.set(key, t); else parent[find(t)] = find(o); }
   corner.clear();
-  // 2. the finest grid whose work fits the budget (a triangle is checked once for each column under it)
+  // 2. each part's direction: a part whose facets all face inward (inside out) has negative volume, so its crossings get flipped
+  const vol = new Float64Array(tris), A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+  for (let t = 0; t < tris; t++) { A.fromBufferAttribute(p as THREE.BufferAttribute, at(t * 3)); B.fromBufferAttribute(p as THREE.BufferAttribute, at(t * 3 + 1)); C.fromBufferAttribute(p as THREE.BufferAttribute, at(t * 3 + 2));
+    vol[find(t)] += A.x * (B.y * C.z - B.z * C.y) - A.y * (B.x * C.z - B.z * C.x) + A.z * (B.x * C.y - B.y * C.x); }
+  // 3. the finest grid whose work fits the budget (a triangle is checked once for each column under it)
   const cover = (N: number) => { let work = 0; const dx = size.x / N, dz = size.z / N;
     for (let t = 0; t < tris && work <= FILL.budget; t++) { const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2);
       work += (Math.floor((Math.max(p.getX(a), p.getX(b), p.getX(c)) - Math.min(p.getX(a), p.getX(b), p.getX(c))) / Math.max(dx, 1e-12)) + 2)
@@ -52,33 +56,36 @@ export function fillOf(g: THREE.BufferGeometry, box: THREE.Box3): number {
     return work; };
   const N = FILL.grids.find((g) => cover(g) <= FILL.budget);
   if (!N) return FILL.unknown;
-  // 3. each triangle, once: for every column under it, does the column's ray (straight up) pass through it? keep only real crossings
+  // 4. each triangle, once: for every column under it, does the column's ray (straight up) pass through it?
+  //    keep the height and whether the ray goes in (+1) or out (-1) there; only real crossings are stored
   const dx = size.x / N, dz = size.z / N, dy = size.y / N, cell = (v: number, lo: number, d: number) => Math.min(N - 1, Math.max(0, Math.floor((v - lo) / Math.max(d, 1e-12))));
-  const ys: number[][] = Array.from({ length: N * N }, () => []), parts: number[][] = Array.from({ length: N * N }, () => []);
+  const ys: number[][] = Array.from({ length: N * N }, () => []), dirs: number[][] = Array.from({ length: N * N }, () => []);
   for (let t = 0; t < tris; t++) {
     const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2), ax = p.getX(a), az = p.getZ(a), bx = p.getX(b), bz = p.getZ(b), cx = p.getX(c), cz = p.getZ(c);
     const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (Math.abs(d) < 1e-12) continue;
-    const part = find(t);
+    const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az), dir = (ny > 0 ? -1 : 1) * (vol[find(t)] < 0 ? -1 : 1);   // facing up = the ray leaves
     for (let ix = cell(Math.min(ax, bx, cx), box.min.x, dx); ix <= cell(Math.max(ax, bx, cx), box.min.x, dx); ix++)
       for (let iz = cell(Math.min(az, bz, cz), box.min.z, dz); iz <= cell(Math.max(az, bz, cz), box.min.z, dz); iz++) {
         const x = box.min.x + (ix + 0.5 + 0.0137) * dx, z = box.min.z + (iz + 0.5 + 0.0071) * dz;   // a tiny nudge so a ray never runs along an edge
         const w1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, w2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d, w3 = 1 - w1 - w2;
-        if (w1 < 0 || w2 < 0 || w3 < 0) continue;
-        const col = ix * N + iz; ys[col].push(w1 * p.getY(a) + w2 * p.getY(b) + w3 * p.getY(c)); parts[col].push(part);
+        if (w1 <= 1e-9 || w2 <= 1e-9 || w3 <= 1e-9) continue;              // exactly on an edge: neither triangle claims it, so a shared edge is never counted twice (a safeguard: the nudge above already keeps rays off Tinkercad box diagonals, and floats rarely land exactly on an edge, so no test can reliably trigger it)
+        const col = ix * N + iz; ys[col].push(w1 * p.getY(a) + w2 * p.getY(b) + w3 * p.getY(c)); dirs[col].push(dir);
       }
   }
-  // 4. per column and part, sorted crossings pair up into "inside" stretches; a cell inside any part counts once
+  // 5. up each column, add up the ins and outs: wherever the count is above zero we're inside something, so overlaps,
+  //    duplicates and shared corners all just count as inside, once.
+  //    Known limits (both rare, neither from Tinkercad's own exports): a reversed part touching a normal one at a corner shares its
+  //    direction, so may be miscounted; a model with holes leaves unclosed columns empty, so it reads a little emptier, not fuller.
   const inside = new Uint8Array(N * N * N);
   for (let col = 0; col < N * N; col++) {
-    const Y = ys[col], P = parts[col]; if (!Y.length) continue;
-    const order = Y.map((_, i) => i).sort((i, j) => P[i] - P[j] || Y[i] - Y[j]), ix = Math.floor(col / N), iz = col % N;
-    for (let k = 0; k < order.length;) {
-      const part = P[order[k]], run: number[] = [];
-      for (; k < order.length && P[order[k]] === part; k++) { const y = Y[order[k]]; if (!run.length || y - run[run.length - 1] > 1e-6) run.push(y); }   // the same surface twice counts once
-      for (let h = 0; h + 1 < run.length; h += 2) { const y0 = Math.floor((run[h] - box.min.y) / dy + 0.5), y1 = Math.floor((run[h + 1] - box.min.y) / dy + 0.5);
-        for (let iy = Math.max(0, y0); iy < Math.min(N, y1); iy++) inside[(iy * N + iz) * N + ix] = 1; }
-    }
-    ys[col] = []; parts[col] = [];                                           // let go of each column's crossings as soon as it's done
+    const Y = ys[col], Dr = dirs[col]; if (!Y.length) continue;
+    const order = Y.map((_, i) => i).sort((i, j) => Y[i] - Y[j]), ix = Math.floor(col / N), iz = col % N;
+    let wind = 0, from = 0;
+    for (const i of order) { const was = wind; wind += Dr[i];
+      if (was <= 0 && wind > 0) from = Y[i];
+      else if (was > 0 && wind <= 0) { const y0 = Math.floor((from - box.min.y) / dy + 0.5), y1 = Math.floor((Y[i] - box.min.y) / dy + 0.5);
+        for (let iy = Math.max(0, y0); iy < Math.min(N, y1); iy++) inside[(iy * N + iz) * N + ix] = 1; } }
+    ys[col] = []; dirs[col] = [];                                            // let go of each column's crossings as soon as it's done
   }
   let count = 0; for (const v of inside) count += v; return count / inside.length;
 }

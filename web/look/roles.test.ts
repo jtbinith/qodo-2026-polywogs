@@ -93,6 +93,14 @@ describe('fullness is measured from inside the model', () => {
     // the same cube twice in the same place is still just one cube's worth
     expect(measure(mergeGeometries([new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), new THREE.BoxGeometry(1, 1, 1).toNonIndexed()])!).fill).toBeGreaterThan(0.95);
   });
+  it("Qodo's case: two boxes on the same base, different heights, count as their union", () => {
+    const short = new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(0, 0.5, 0), tall = new THREE.BoxGeometry(1, 2, 1).toNonIndexed().translate(0, 1, 0);   // same base corners
+    expect(measure(mergeGeometries([short, tall])!).fill).toBeGreaterThan(0.95);                                                            // union = the tall box, which fills its box
+  });
+  it('a model with only one of its two parts inside out still measures right', () => {
+    const a = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), b = flipped(new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(2, 0, 0));
+    expect(measure(mergeGeometries([a, b])!).fill).toBeCloseTo(2 / 3, 1);
+  });
   it('two separate parts with a gap between them leave the gap empty', () => {
     const a = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), b = new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(2, 0, 0);   // box 3 wide, 2 of it solid
     expect(measure(mergeGeometries([a, b])!).fill).toBeCloseTo(2 / 3, 1);
