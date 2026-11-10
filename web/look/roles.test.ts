@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { jobFor, measure, scores, statsFor, type Job, type Shape } from './roles';
+import { FILL, fillOf, jobFor, measure, scores, statsFor, type Job, type Shape } from './roles';
 
 const job = (g: THREE.BufferGeometry) => jobFor(measure(g));
 
@@ -96,5 +96,20 @@ describe('fullness is measured from inside the model', () => {
   it('two separate parts with a gap between them leave the gap empty', () => {
     const a = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), b = new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(2, 0, 0);   // box 3 wide, 2 of it solid
     expect(measure(mergeGeometries([a, b])!).fill).toBeCloseTo(2 / 3, 1);
+  });
+});
+
+describe('measuring stays fast and small for any accepted file', () => {
+  // the worst case Qodo described: about 500k triangles (a 25 MB STL), every one a broad sliver spanning the whole model
+  const slivers = (count: number) => { const pos = new Float32Array(count * 9);
+    for (let t = 0; t < count; t++) { const y = (t % 1000) / 1000; pos.set([-1, y, -1, 1, y + 0.0001, -1, 0, y, 1], t * 9); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.computeBoundingBox(); return g; };
+  it('500k broad triangles measure in under 3 seconds, within the work budget', () => {
+    const g = slivers(500_000), t0 = performance.now(), f = fillOf(g, g.boundingBox!);
+    expect(performance.now() - t0).toBeLessThan(3000); expect(f).toBeGreaterThanOrEqual(0); expect(f).toBeLessThanOrEqual(1);
+  }, 20_000);
+  it('a heavy model falls back to a coarser grid instead of doing unbounded work', () => {
+    const g = slivers(20_000); expect(fillOf(g, g.boundingBox!)).toBeGreaterThanOrEqual(0);
+    expect(FILL.grids[FILL.grids.length - 1]).toBeLessThan(FILL.grids[0]);
   });
 });

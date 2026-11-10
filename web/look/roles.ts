@@ -24,36 +24,61 @@ export interface Stats { speed: number; bounce: number; stamina: number }   // 1
 /** How much of its box a model fills, 0..1, by sampling inside it rather than adding up triangle volumes.
  *  Each separate part (Tinkercad keeps grouped shapes as their own shells) is tested on its own with rays straight up through
  *  a grid of columns: crossings in and out don't depend on which way a facet faces, so reversed facets don't matter, and a point
- *  inside any part counts once, so overlapping parts aren't counted twice. */
-export const FILL_GRID = 20;
+ *  inside any part counts once, so overlapping parts aren't counted twice.
+ *  Memory grows only with real crossings, and the work is capped by a budget (a coarser grid for heavy models), so any accepted
+ *  file measures in bounded time. */
+export const FILL = {
+  grids: [20, 14, 10, 7],   // columns per side to try, finest first
+  budget: 6_000_000,        // most triangle-in-column checks allowed for one model: keeps import time and memory bounded
+  unknown: 0.5,             // fullness to assume if even the coarsest grid is over budget (a pathological file)
+};
 export function fillOf(g: THREE.BufferGeometry, box: THREE.Box3): number {
   const p = g.getAttribute('position'), idx = g.getIndex(), n = idx ? idx.count : p.count, at = (i: number) => (idx ? idx.getX(i) : i), tris = Math.floor(n / 3);
   if (!tris) return 0;
-  // 1. split into parts: triangles that share a corner belong to the same part
-  const parent = Array.from({ length: tris }, (_, i) => i), find = (i: number): number => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
-  const seen = new Map<string, number>(), key = (v: number) => `${p.getX(v).toFixed(4)},${p.getY(v).toFixed(4)},${p.getZ(v).toFixed(4)}`;
-  for (let t = 0; t < tris; t++) for (let k = 0; k < 3; k++) { const kk = key(at(t * 3 + k)), o = seen.get(kk); if (o === undefined) seen.set(kk, t); else parent[find(t)] = find(o); }
-  // 2. one ray per column, straight up: each part's crossings, sorted, pair up into "inside" stretches; mark the cells they cover
-  const N = FILL_GRID, size = box.getSize(new THREE.Vector3()), inside = new Uint8Array(N * N * N);
-  const dx = size.x / N, dz = size.z / N, dy = size.y / N;
-  // sort triangles into the columns they cover, so each ray only checks its own (big models stay fast)
-  const cols: number[][] = Array.from({ length: N * N }, () => []), cell = (v: number, lo: number, d: number) => Math.min(N - 1, Math.max(0, Math.floor((v - lo) / Math.max(d, 1e-12))));
-  for (let t = 0; t < tris; t++) { const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2);
-    const x0 = cell(Math.min(p.getX(a), p.getX(b), p.getX(c)), box.min.x, dx), x1 = cell(Math.max(p.getX(a), p.getX(b), p.getX(c)), box.min.x, dx);
-    const z0 = cell(Math.min(p.getZ(a), p.getZ(b), p.getZ(c)), box.min.z, dz), z1 = cell(Math.max(p.getZ(a), p.getZ(b), p.getZ(c)), box.min.z, dz);
-    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) cols[ix * N + iz].push(t); }
-  for (let ix = 0; ix < N; ix++) for (let iz = 0; iz < N; iz++) {
-    const x = box.min.x + (ix + 0.5 + 0.0137) * dx, z = box.min.z + (iz + 0.5 + 0.0071) * dz, hits = new Map<number, number[]>();   // a tiny nudge so a ray never runs along an edge
-    for (const t of cols[ix * N + iz]) {
-      const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2), ax = p.getX(a), az = p.getZ(a), bx = p.getX(b), bz = p.getZ(b), cx = p.getX(c), cz = p.getZ(c);
-      const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (Math.abs(d) < 1e-12) continue;
-      const w1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, w2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d, w3 = 1 - w1 - w2;
-      if (w1 < 0 || w2 < 0 || w3 < 0) continue;
-      const y = w1 * p.getY(a) + w2 * p.getY(b) + w3 * p.getY(c), part = find(t); (hits.get(part) ?? hits.set(part, []).get(part)!).push(y);
+  const size = box.getSize(new THREE.Vector3()), q = (v: number, lo: number, s: number) => Math.min(131071, Math.max(0, Math.round(((v - lo) / Math.max(s, 1e-12)) * 131071)));
+  // 1. split into parts: triangles sharing a corner belong to the same part (corners matched on a fine grid, as one number each)
+  const parent = new Int32Array(tris), corner = new Map<number, number>();
+  for (let t = 0; t < tris; t++) parent[t] = t;
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  for (let t = 0; t < tris; t++) for (let k = 0; k < 3; k++) { const v = at(t * 3 + k);
+    const key = (q(p.getX(v), box.min.x, size.x) * 131072 + q(p.getY(v), box.min.y, size.y)) * 131072 + q(p.getZ(v), box.min.z, size.z), o = corner.get(key);
+    if (o === undefined) corner.set(key, t); else parent[find(t)] = find(o); }
+  corner.clear();
+  // 2. the finest grid whose work fits the budget (a triangle is checked once for each column under it)
+  const cover = (N: number) => { let work = 0; const dx = size.x / N, dz = size.z / N;
+    for (let t = 0; t < tris && work <= FILL.budget; t++) { const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2);
+      work += (Math.floor((Math.max(p.getX(a), p.getX(b), p.getX(c)) - Math.min(p.getX(a), p.getX(b), p.getX(c))) / Math.max(dx, 1e-12)) + 2)
+            * (Math.floor((Math.max(p.getZ(a), p.getZ(b), p.getZ(c)) - Math.min(p.getZ(a), p.getZ(b), p.getZ(c))) / Math.max(dz, 1e-12)) + 2); }
+    return work; };
+  const N = FILL.grids.find((g) => cover(g) <= FILL.budget);
+  if (!N) return FILL.unknown;
+  // 3. each triangle, once: for every column under it, does the column's ray (straight up) pass through it? keep only real crossings
+  const dx = size.x / N, dz = size.z / N, dy = size.y / N, cell = (v: number, lo: number, d: number) => Math.min(N - 1, Math.max(0, Math.floor((v - lo) / Math.max(d, 1e-12))));
+  const ys: number[][] = Array.from({ length: N * N }, () => []), parts: number[][] = Array.from({ length: N * N }, () => []);
+  for (let t = 0; t < tris; t++) {
+    const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2), ax = p.getX(a), az = p.getZ(a), bx = p.getX(b), bz = p.getZ(b), cx = p.getX(c), cz = p.getZ(c);
+    const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (Math.abs(d) < 1e-12) continue;
+    const part = find(t);
+    for (let ix = cell(Math.min(ax, bx, cx), box.min.x, dx); ix <= cell(Math.max(ax, bx, cx), box.min.x, dx); ix++)
+      for (let iz = cell(Math.min(az, bz, cz), box.min.z, dz); iz <= cell(Math.max(az, bz, cz), box.min.z, dz); iz++) {
+        const x = box.min.x + (ix + 0.5 + 0.0137) * dx, z = box.min.z + (iz + 0.5 + 0.0071) * dz;   // a tiny nudge so a ray never runs along an edge
+        const w1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, w2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d, w3 = 1 - w1 - w2;
+        if (w1 < 0 || w2 < 0 || w3 < 0) continue;
+        const col = ix * N + iz; ys[col].push(w1 * p.getY(a) + w2 * p.getY(b) + w3 * p.getY(c)); parts[col].push(part);
+      }
+  }
+  // 4. per column and part, sorted crossings pair up into "inside" stretches; a cell inside any part counts once
+  const inside = new Uint8Array(N * N * N);
+  for (let col = 0; col < N * N; col++) {
+    const Y = ys[col], P = parts[col]; if (!Y.length) continue;
+    const order = Y.map((_, i) => i).sort((i, j) => P[i] - P[j] || Y[i] - Y[j]), ix = Math.floor(col / N), iz = col % N;
+    for (let k = 0; k < order.length;) {
+      const part = P[order[k]], run: number[] = [];
+      for (; k < order.length && P[order[k]] === part; k++) { const y = Y[order[k]]; if (!run.length || y - run[run.length - 1] > 1e-6) run.push(y); }   // the same surface twice counts once
+      for (let h = 0; h + 1 < run.length; h += 2) { const y0 = Math.floor((run[h] - box.min.y) / dy + 0.5), y1 = Math.floor((run[h + 1] - box.min.y) / dy + 0.5);
+        for (let iy = Math.max(0, y0); iy < Math.min(N, y1); iy++) inside[(iy * N + iz) * N + ix] = 1; }
     }
-    for (const all of hits.values()) { all.sort((u, v) => u - v); const ys = all.filter((y, i) => i === 0 || y - all[i - 1] > 1e-6);   // the same surface twice (a duplicated part) counts once
-      for (let h = 0; h + 1 < ys.length; h += 2) { const y0 = Math.floor((ys[h] - box.min.y) / dy + 0.5), y1 = Math.floor((ys[h + 1] - box.min.y) / dy + 0.5);
-        for (let iy = Math.max(0, y0); iy < Math.min(N, y1); iy++) inside[(iy * N + iz) * N + ix] = 1; } }
+    ys[col] = []; parts[col] = [];                                           // let go of each column's crossings as soon as it's done
   }
   let count = 0; for (const v of inside) count += v; return count / inside.length;
 }
