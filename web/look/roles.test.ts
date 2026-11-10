@@ -97,6 +97,11 @@ describe('fullness is measured from inside the model', () => {
     const short = new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(0, 0.5, 0), tall = new THREE.BoxGeometry(1, 2, 1).toNonIndexed().translate(0, 1, 0);   // same base corners
     expect(measure(mergeGeometries([short, tall])!).fill).toBeGreaterThan(0.95);                                                            // union = the tall box, which fills its box
   });
+  it('a sealed hollow inside a model counts as empty, not solid', () => {
+    const outer = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), cavity = flipped(new THREE.BoxGeometry(0.8, 0.8, 0.8));   // walls 0.1 thick
+    expect(measure(mergeGeometries([outer, cavity])!).fill).toBeLessThan(0.6);                                         // about 1 - 0.8^3 = 0.49
+  });
+  it('an inside-out box on its own is still full', () => expect(measure(flipped(new THREE.BoxGeometry(1, 1, 1))).fill).toBeGreaterThan(0.95));
   it('a model with only one of its two parts inside out still measures right', () => {
     const a = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), b = flipped(new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(2, 0, 0));
     expect(measure(mergeGeometries([a, b])!).fill).toBeCloseTo(2 / 3, 1);

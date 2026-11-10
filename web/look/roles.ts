@@ -24,7 +24,8 @@ export interface Stats { speed: number; bounce: number; stamina: number }   // 1
 /** How much of its box a model fills, 0..1, by sampling inside it rather than adding up triangle volumes.
  *  Rays go straight up through a grid of columns, adding 1 going into a surface and taking 1 away coming out: anywhere the count
  *  is above zero is inside something, so overlapping or duplicated parts count once (their union), whatever corners they share.
- *  Each separate part's direction is checked by its volume, so a part with its facets reversed (inside out) still counts properly.
+ *  A part facing inward is flipped if it's on its own (inside out) but left alone if it's sealed inside another part (a hollow),
+ *  so reversed files and models with cavities both measure right.
  *  Memory grows only with real crossings, and the work is capped by a budget (a coarser grid for heavy models), so any accepted
  *  file measures in bounded time. */
 export const FILL = {
@@ -48,6 +49,21 @@ export function fillOf(g: THREE.BufferGeometry, box: THREE.Box3): number {
   const vol = new Float64Array(tris), A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
   for (let t = 0; t < tris; t++) { A.fromBufferAttribute(p as THREE.BufferAttribute, at(t * 3)); B.fromBufferAttribute(p as THREE.BufferAttribute, at(t * 3 + 1)); C.fromBufferAttribute(p as THREE.BufferAttribute, at(t * 3 + 2));
     vol[find(t)] += A.x * (B.y * C.z - B.z * C.y) - A.y * (B.x * C.z - B.z * C.x) + A.z * (B.x * C.y - B.y * C.x); }
+  // a negative-volume part is either inside out (flip it) or a sealed hollow inside another part (a cavity: leave it, so it reads as
+  // empty). Tell them apart with one ray up from one of its corners: crossing other parts an odd number of times means it's enclosed.
+  const flip = new Set<number>(), firstOf = new Map<number, number>();
+  for (let t = 0; t < tris; t++) { const r = find(t); if (vol[r] < 0 && !firstOf.has(r)) firstOf.set(r, t); }
+  for (const [r, t0] of firstOf) {
+    if (firstOf.size > 20) { flip.add(r); continue; }                      // lots of inside-out bits: a broken file, just flip them (keeps it fast)
+    const v = at(t0 * 3), px = p.getX(v) + 1.3e-6, py = p.getY(v), pz = p.getZ(v) + 0.7e-6; let crossings = 0;
+    for (let t = 0; t < tris; t++) { if (find(t) === r) continue;
+      const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2), ax = p.getX(a), az = p.getZ(a), bx = p.getX(b), bz = p.getZ(b), cx = p.getX(c), cz = p.getZ(c);
+      const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (Math.abs(d) < 1e-12) continue;
+      const w1 = ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz)) / d, w2 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / d, w3 = 1 - w1 - w2;
+      if (w1 <= 1e-9 || w2 <= 1e-9 || w3 <= 1e-9) continue;
+      if (w1 * p.getY(a) + w2 * p.getY(b) + w3 * p.getY(c) > py) crossings++; }
+    if (crossings % 2 === 0) flip.add(r);                                    // not inside anything: inside out, so flip it
+  }
   // 3. the finest grid whose work fits the budget (a triangle is checked once for each column under it)
   const cover = (N: number) => { let work = 0; const dx = size.x / N, dz = size.z / N;
     for (let t = 0; t < tris && work <= FILL.budget; t++) { const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2);
@@ -63,7 +79,7 @@ export function fillOf(g: THREE.BufferGeometry, box: THREE.Box3): number {
   for (let t = 0; t < tris; t++) {
     const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2), ax = p.getX(a), az = p.getZ(a), bx = p.getX(b), bz = p.getZ(b), cx = p.getX(c), cz = p.getZ(c);
     const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (Math.abs(d) < 1e-12) continue;
-    const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az), dir = (ny > 0 ? -1 : 1) * (vol[find(t)] < 0 ? -1 : 1);   // facing up = the ray leaves
+    const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az), dir = (ny > 0 ? -1 : 1) * (flip.has(find(t)) ? -1 : 1);   // facing up = the ray leaves
     for (let ix = cell(Math.min(ax, bx, cx), box.min.x, dx); ix <= cell(Math.max(ax, bx, cx), box.min.x, dx); ix++)
       for (let iz = cell(Math.min(az, bz, cz), box.min.z, dz); iz <= cell(Math.max(az, bz, cz), box.min.z, dz); iz++) {
         const x = box.min.x + (ix + 0.5 + 0.0137) * dx, z = box.min.z + (iz + 0.5 + 0.0071) * dz;   // a tiny nudge so a ray never runs along an edge
