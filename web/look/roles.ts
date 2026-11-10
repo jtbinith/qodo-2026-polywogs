@@ -21,21 +21,57 @@ export interface Shape {
 }
 export interface Stats { speed: number; bounce: number; stamina: number }   // 1..10 each; all three change how it moves today
 
+/** How much of its box a model fills, 0..1, by sampling inside it rather than adding up triangle volumes.
+ *  Each separate part (Tinkercad keeps grouped shapes as their own shells) is tested on its own with rays straight up through
+ *  a grid of columns: crossings in and out don't depend on which way a facet faces, so reversed facets don't matter, and a point
+ *  inside any part counts once, so overlapping parts aren't counted twice. */
+export const FILL_GRID = 20;
+export function fillOf(g: THREE.BufferGeometry, box: THREE.Box3): number {
+  const p = g.getAttribute('position'), idx = g.getIndex(), n = idx ? idx.count : p.count, at = (i: number) => (idx ? idx.getX(i) : i), tris = Math.floor(n / 3);
+  if (!tris) return 0;
+  // 1. split into parts: triangles that share a corner belong to the same part
+  const parent = Array.from({ length: tris }, (_, i) => i), find = (i: number): number => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  const seen = new Map<string, number>(), key = (v: number) => `${p.getX(v).toFixed(4)},${p.getY(v).toFixed(4)},${p.getZ(v).toFixed(4)}`;
+  for (let t = 0; t < tris; t++) for (let k = 0; k < 3; k++) { const kk = key(at(t * 3 + k)), o = seen.get(kk); if (o === undefined) seen.set(kk, t); else parent[find(t)] = find(o); }
+  // 2. one ray per column, straight up: each part's crossings, sorted, pair up into "inside" stretches; mark the cells they cover
+  const N = FILL_GRID, size = box.getSize(new THREE.Vector3()), inside = new Uint8Array(N * N * N);
+  const dx = size.x / N, dz = size.z / N, dy = size.y / N;
+  // sort triangles into the columns they cover, so each ray only checks its own (big models stay fast)
+  const cols: number[][] = Array.from({ length: N * N }, () => []), cell = (v: number, lo: number, d: number) => Math.min(N - 1, Math.max(0, Math.floor((v - lo) / Math.max(d, 1e-12))));
+  for (let t = 0; t < tris; t++) { const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2);
+    const x0 = cell(Math.min(p.getX(a), p.getX(b), p.getX(c)), box.min.x, dx), x1 = cell(Math.max(p.getX(a), p.getX(b), p.getX(c)), box.min.x, dx);
+    const z0 = cell(Math.min(p.getZ(a), p.getZ(b), p.getZ(c)), box.min.z, dz), z1 = cell(Math.max(p.getZ(a), p.getZ(b), p.getZ(c)), box.min.z, dz);
+    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) cols[ix * N + iz].push(t); }
+  for (let ix = 0; ix < N; ix++) for (let iz = 0; iz < N; iz++) {
+    const x = box.min.x + (ix + 0.5 + 0.0137) * dx, z = box.min.z + (iz + 0.5 + 0.0071) * dz, hits = new Map<number, number[]>();   // a tiny nudge so a ray never runs along an edge
+    for (const t of cols[ix * N + iz]) {
+      const a = at(t * 3), b = at(t * 3 + 1), c = at(t * 3 + 2), ax = p.getX(a), az = p.getZ(a), bx = p.getX(b), bz = p.getZ(b), cx = p.getX(c), cz = p.getZ(c);
+      const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (Math.abs(d) < 1e-12) continue;
+      const w1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, w2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d, w3 = 1 - w1 - w2;
+      if (w1 < 0 || w2 < 0 || w3 < 0) continue;
+      const y = w1 * p.getY(a) + w2 * p.getY(b) + w3 * p.getY(c), part = find(t); (hits.get(part) ?? hits.set(part, []).get(part)!).push(y);
+    }
+    for (const all of hits.values()) { all.sort((u, v) => u - v); const ys = all.filter((y, i) => i === 0 || y - all[i - 1] > 1e-6);   // the same surface twice (a duplicated part) counts once
+      for (let h = 0; h + 1 < ys.length; h += 2) { const y0 = Math.floor((ys[h] - box.min.y) / dy + 0.5), y1 = Math.floor((ys[h + 1] - box.min.y) / dy + 0.5);
+        for (let iy = Math.max(0, y0); iy < Math.min(N, y1); iy++) inside[(iy * N + iz) * N + ix] = 1; } }
+  }
+  let count = 0; for (const v of inside) count += v; return count / inside.length;
+}
+
 export function measure(g: THREE.BufferGeometry): Shape {
   g.computeBoundingBox(); const box = g.boundingBox!, mid = box.getCenter(new THREE.Vector3());
   const e = box.getSize(new THREE.Vector3()).toArray().sort((a, b) => b - a);
   const p = g.getAttribute('position'), idx = g.getIndex(), n = idx ? idx.count : p.count, at = (i: number) => (idx ? idx.getX(i) : i);
   const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), AB = new THREE.Vector3(), AC = new THREE.Vector3(), cen = new THREE.Vector3();
   const half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5).max(new THREE.Vector3(1e-6, 1e-6, 1e-6));   // per-side, so being long or flat doesn't count as pointy
-  let vol = 0, area = 0, sr = 0, sr2 = 0;
+  let area = 0, sr = 0, sr2 = 0;
   for (let i = 0; i + 2 < n; i += 3) {
     A.fromBufferAttribute(p, at(i)); B.fromBufferAttribute(p, at(i + 1)); C.fromBufferAttribute(p, at(i + 2));
-    vol += A.dot(AB.copy(B).cross(C)) / 6;                                         // signed volume, so closed meshes sum to their volume
     const ar = AB.copy(B).sub(A).cross(AC.copy(C).sub(A)).length() / 2; area += ar;
     const r = cen.copy(A).add(B).add(C).divideScalar(3).sub(mid).divide(half).length(); sr += r * ar; sr2 += r * r * ar;
   }
   const mean = area > 0 ? sr / area : 0, spread = mean > 0 ? Math.sqrt(Math.max(0, sr2 / area - mean * mean)) / mean : 0;
-  const fill = Math.min(1, Math.abs(vol) / Math.max(1e-9, e[0] * e[1] * e[2]));
+  const fill = fillOf(g, box);
   return { size: e[0], long: e[0] / Math.max(1e-9, e[1]), flat: e[2] / Math.max(1e-9, e[1]), fill, pointy: spread + (1 - fill) * 0.3 };
 }
 

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { jobFor, measure, scores, statsFor, type Job, type Shape } from './roles';
 
 const job = (g: THREE.BufferGeometry) => jobFor(measure(g));
@@ -69,5 +70,26 @@ describe('what the island needs', () => {
   it('ties always break the same way', () => {
     const s: Shape = { size: 1, long: 1, flat: 1, fill: 0, pointy: 0 };
     expect(new Set(Array.from({ length: 20 }, () => jobFor(s, ['fan', 'courier']))).size).toBe(1);
+  });
+});
+
+describe('fullness is measured from inside the model', () => {
+  const flipped = (g: THREE.BufferGeometry) => { const n = g.toNonIndexed(), p = n.getAttribute('position');   // every facet facing the wrong way
+    for (let i = 0; i < p.count; i += 3) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i); p.setXYZ(i, p.getX(i + 1), p.getY(i + 1), p.getZ(i + 1)); p.setXYZ(i + 1, x, y, z); } return n; };
+  it('a solid block is about full', () => expect(measure(new THREE.BoxGeometry(1, 1, 1)).fill).toBeGreaterThan(0.95));
+  it('a ball fills about half its box', () => expect(measure(new THREE.SphereGeometry(0.5, 48, 24)).fill).toBeCloseTo(Math.PI / 6, 1));
+  it('reversed facets give the same fullness', () => {
+    expect(measure(flipped(new THREE.SphereGeometry(0.5, 32, 16))).fill).toBeCloseTo(measure(new THREE.SphereGeometry(0.5, 32, 16)).fill, 5);
+  });
+  it('overlapping parts count once (their union), not twice', () => {
+    // two 1x1x1 cubes overlapping by half: union = 1.5, box = 1.5 x 1 x 1, so the box is full
+    const a = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), b = new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(0.5, 0, 0);
+    expect(measure(mergeGeometries([a, b])!).fill).toBeGreaterThan(0.95);
+    // the same cube twice in the same place is still just one cube's worth
+    expect(measure(mergeGeometries([new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), new THREE.BoxGeometry(1, 1, 1).toNonIndexed()])!).fill).toBeGreaterThan(0.95);
+  });
+  it('two separate parts with a gap between them leave the gap empty', () => {
+    const a = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), b = new THREE.BoxGeometry(1, 1, 1).toNonIndexed().translate(2, 0, 0);   // box 3 wide, 2 of it solid
+    expect(measure(mergeGeometries([a, b])!).fill).toBeCloseTo(2 / 3, 1);
   });
 });
