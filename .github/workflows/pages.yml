@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 25
+          node-version: 24   # LTS; the test runner (vitest) supports Node 22.12+, 24 and 26+, not 25
           cache: npm
       - run: npm ci
       - run: npm test
