@@ -12,11 +12,12 @@ export const CARD = { showFor: 5, maxName: 20 };   // seconds big before it tuck
 
 const STAT_LABEL: Record<keyof Stats, string> = { speed: 'Speed', bounce: 'Bounce', stamina: 'Stamina' };
 const css = `
-  .pw-stack { position: fixed; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; z-index: 5; font-family: 'Courier New', monospace; color: ${INK}; }
+  .pw-stack { position: fixed; top: 12px; right: 12px; max-height: calc(100vh - 80px); overflow-y: auto; overscroll-behavior: contain; padding: 0 6px 6px 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; z-index: 5; font-family: 'Courier New', monospace; color: ${INK}; }
   .pw-card { background: #fff6e6; border: 3px solid ${INK}; border-radius: 16px; box-shadow: 4px 4px 0 ${INK}55; transition: transform .25s; }
   .pw-mini { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; cursor: pointer; font: 700 13px 'Courier New', monospace; }
   .pw-mini img { width: 34px; height: 34px; border-radius: 8px; background: #1d1d6e; }
-  .pw-big { position: fixed; right: 24px; top: 50%; transform: translateY(-50%) scale(var(--pop, 1)); width: 250px; padding: 12px; z-index: 6; }
+  .pw-big { position: fixed; right: 24px; top: 50%; transform: translateY(-50%) scale(var(--pop, 1)); width: 250px; max-width: calc(100vw - 48px); max-height: calc(100vh - 24px); overflow-y: auto; box-sizing: border-box; padding: 12px; z-index: 6; }
+  .pw-big .close { position: sticky; float: right; top: 0; margin: -6px -4px 0 0; z-index: 1; }
   .pw-big .pic { width: 100%; aspect-ratio: 1; border-radius: 12px; background: #1d1d6e; display: block; }
   .pw-big input { width: 100%; box-sizing: border-box; margin: 8px 0 4px; padding: 4px 6px; border: 2px dashed ${INK}66; border-radius: 8px; background: transparent; font: 700 18px 'Courier New', monospace; color: ${INK}; }
   .pw-big .badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 2px; border-radius: 999px; border: 2px solid ${INK}; font: 700 14px 'Courier New', monospace; text-transform: uppercase; }
@@ -25,7 +26,8 @@ const css = `
   .pw-big .bar { height: 10px; border-radius: 6px; border: 2px solid ${INK}; overflow: hidden; } .pw-big .bar i { display: block; height: 100%; }
   .pw-big .does { font: 13px 'Courier New', monospace; margin: 8px 0; }
   .pw-big .row { display: flex; gap: 6px; } .pw-big button { flex: 1; padding: 6px; border-radius: 10px; border: 2px solid ${INK}; background: #fff; font: 700 12px 'Courier New', monospace; color: ${INK}; cursor: pointer; }
-  .pw-big .close { position: absolute; top: 4px; right: 8px; flex: none; border: 0; background: none; font-size: 18px; padding: 0 4px; }`;
+  .pw-big .close { flex: none; border: 0; background: none; font-size: 18px; padding: 0 4px; }
+  @media (max-height: 520px) { .pw-big { width: 380px; } .pw-big .pic { width: 40%; float: left; margin: 0 10px 4px 0; } .pw-big input { width: 55%; } }   /* short landscape: picture beside the name, so it all fits */`;
 
 const icon = (job: Job, px = 64): string => { const c = document.createElement('canvas'); c.width = c.height = px; drawIcon(c.getContext('2d')!, job, px / 2, px / 2, px * 0.36); return c.toDataURL(); };
 let thumbR: THREE.WebGLRenderer | null = null;
