@@ -68,6 +68,8 @@ export interface Island {
   /** meshes the cube can stand on or climb (no outlines, particles, water or glows) */
   solids: () => THREE.Object3D[];
   layout: () => IslandLayout;
+  /** grass leans away from these spots (creatures), up to 64 */
+  partGrass: (spots: { x: number; z: number; r: number }[]) => void;
   tick: Tick;
 }
 
@@ -166,9 +168,17 @@ export function buildIsland(scene: THREE.Scene, L: IslandLayout): Island {
 
   // meadow: the dream meadow's swaying brush-stroke cards, with its magenta paths; kept off the sand and out of ponds
   const cardMat = new THREE.MeshLambertMaterial({ map: brushTex(), alphaTest: 0.35, side: THREE.DoubleSide, emissive: D.meadow.emissive }), U = { value: 0 };
-  cardMat.onBeforeCompile = (sh) => { sh.uniforms.uT = U; sh.vertexShader = 'uniform float uT;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  // grass parts around creatures: up to PARTERS spots (x, z, radius); blades near one lean away from it and squash down, roots stay put
+  const PARTERS = 64, parts = { value: Array.from({ length: PARTERS }, () => new THREE.Vector4(0, 0, 0, 0)) }, partCount = { value: 0 };
+  cardMat.onBeforeCompile = (sh) => { sh.uniforms.uT = U; sh.uniforms.uParts = parts; sh.uniforms.uPartCount = partCount;
+    sh.vertexShader = `uniform float uT; uniform vec4 uParts[${PARTERS}]; uniform int uPartCount;\n` + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
     vec4 ip = instanceMatrix * vec4(0.,0.,0.,1.); float k = uv.y * uv.y;
-    transformed.x += k * (sin(uT * 1.3 + ip.x * .6 + ip.z * .4) * .12 + sin(uT * 3.1 + ip.z) * .04);`); };
+    transformed.x += k * (sin(uT * 1.3 + ip.x * .6 + ip.z * .4) * .12 + sin(uT * 3.1 + ip.z) * .04);`).replace('#include <project_vertex>', `
+    vec4 wp = modelMatrix * instanceMatrix * vec4(transformed, 1.);
+    for (int i = 0; i < ${PARTERS}; i++) { if (i >= uPartCount) break; vec4 c = uParts[i]; if (c.z <= 0.) continue;   // only as many as there are creatures
+      vec2 d = wp.xz - c.xy; float l = max(length(d), 1e-3), f = (1. - smoothstep(c.z * .55, c.z * 1.5, l)) * k;
+      wp.xz += d / l * f * c.z * .7; wp.y = mix(wp.y, ${GROUND_Y.toFixed(2)} + (wp.y - ${GROUND_Y.toFixed(2)}) * .25, f); }
+    vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition;`); };
   ticks.push((t) => (U.value = t));
 
   // fireflies: each a tiny lantern (warm core, soft halo, a small real light), drifting and blinking over the meadow
@@ -209,5 +219,6 @@ export function buildIsland(scene: THREE.Scene, L: IslandLayout): Island {
   const layout = (): IslandLayout => ({ seed: L.seed, radius: L.radius, grass: L.grass, zones: [],
     pinned: items.map(({ p, g }) => { const o: Pinned = { kind: p.kind, x: +g.position.x.toFixed(2), z: +g.position.z.toFixed(2), ry: +g.rotation.y.toFixed(2), s: +g.scale.x.toFixed(3) };
       const y = +(g.position.y - GROUND_Y).toFixed(2); if (y) o.y = y; if (p.colour) o.colour = p.colour; return o; }) });
-  return { edgeR, items, land, add, remove, regrow, solids, layout, tick: (t) => ticks.forEach((f) => f(t)) };
+  const partGrass = (spots: { x: number; z: number; r: number }[]): void => { partCount.value = Math.min(spots.length, PARTERS); parts.value.forEach((v, i) => { const p = spots[i]; v.set(p?.x ?? 0, p?.z ?? 0, p?.r ?? 0, 0); }); };
+  return { edgeR, items, land, add, remove, regrow, solids, layout, partGrass, tick: (t) => ticks.forEach((f) => f(t)) };
 }

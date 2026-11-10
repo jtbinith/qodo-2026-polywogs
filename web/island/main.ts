@@ -8,6 +8,7 @@ import { DREAM as D, ROCKS, type RockColour } from '../look/palette';
 import { bands, cubeGeo, outline, spring, type Tick } from '../look/helpers';
 import { GROUND_Y, KINDS, buildIsland, type IslandLayout, type Item, type Kind } from '../look/island';
 import { EXAMPLE_ISLAND, MEADOW_ISLAND } from './layout';
+import { addCreatures } from './creatures';
 
 // The test island: walk it as the cube (it climbs!), or open with ?edit to lay it out.
 const q = new URLSearchParams(location.search), fixedT = q.has('t') ? Number(q.get('t')) : null, EDIT = q.has('edit'), WALKER = q.has('walker');   // ?walker = walk it as the toy cube
@@ -45,6 +46,9 @@ if (WALKER) document.getElementById('help')!.textContent = 'WASD / arrows to mov
 const look = EDIT ? null : new OrbitControls(camera, renderer.domElement);
 if (look) { camera.position.set(0, GROUND_Y + (WALKER ? 6.5 : 8), WALKER ? 8.5 : 12); look.target.set(0, GROUND_Y + 0.4, 0);
   Object.assign(look, { enablePan: !WALKER, screenSpacePanning: false, enableDamping: true, minDistance: 2.5, maxDistance: 30, maxPolarAngle: 1.45 }); look.update(); }
+
+// drop a Tinkercad STL on the page and it lands as a creature where you're looking (or near the cube with ?walker)
+if (!EDIT) ticks.push(addCreatures(scene, island, () => (WALKER || !look ? cube.position : look.target)));
 
 // climbing: stand on whatever is underneath; push into something and the cube scrambles up it
 const down = new THREE.Raycaster(), ahead = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);
