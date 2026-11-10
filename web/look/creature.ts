@@ -8,6 +8,8 @@ import { bands, outline, type Tick } from './helpers';
 export const CREATURE = {
   worldPerMm: 0.05,                 // Tinkercad's 20 mm default shapes come out 1.0 tall, well above the meadow grass
   minSize: 0.5, maxSize: 2.0,       // tiny or huge models are clamped so they stay creature-sized
+  maxFileMB: 25,                    // the biggest STL we'll read (Tinkercad's own import limit); bigger files would stall the page
+  maxCreatures: 30,                 // per device for now, so older club laptops stay smooth
   crease: 35,                       // faces meeting more sharply than this keep a hard edge (cube corners); softer ones go smooth (spheres)
   // candy colours from the look guide: toy cube, toy ball, lantern, mushroom cap, moss tips, meadow violet
   colours: [D.creatures.cube, D.creatures.ball, '#ffb347', '#ffb56a', '#a8d44a', '#b047c8'],
@@ -16,13 +18,21 @@ export const CREATURE = {
 };
 
 export interface CreatureModel { geo: THREE.BufferGeometry; size: THREE.Vector3; mm: THREE.Vector3; tris: number }
+/** Height used for the wake-up sweep and walking pace: never less than a quarter of the model's biggest side, so very flat models
+ *  (a 1 mm name tag) still wake up properly and don't race around. */
+export const bodyHeight = (m: CreatureModel): number => Math.max(m.size.y, 0.25 * Math.max(m.size.x, m.size.y, m.size.z));
 
 /** STL bytes -> upright, centred, sitting-on-the-ground geometry at creature scale. Tinkercad exports Z-up in millimetres. */
 export function creatureModel(bytes: ArrayBuffer): CreatureModel {
-  let g = new STLLoader().parse(bytes);
+  let g: THREE.BufferGeometry;
+  try { g = new STLLoader().parse(bytes); } catch { throw new Error("it doesn't look like an STL file"); }
+  const pos = g.getAttribute('position');
+  if (!pos || pos.count < 3 || !(pos.array as Float32Array).every(Number.isFinite)) throw new Error('it has no shape in it');
   g.deleteAttribute('normal'); g.rotateX(-Math.PI / 2);                        // Z-up -> Y-up
   g.computeBoundingBox(); const mm = g.boundingBox!.getSize(new THREE.Vector3());
-  const big = Math.max(mm.x, mm.y, mm.z), size = THREE.MathUtils.clamp(big * CREATURE.worldPerMm, CREATURE.minSize, CREATURE.maxSize);
+  const big = Math.max(mm.x, mm.y, mm.z);
+  if (!(big > 1e-6)) throw new Error('it has no size');                // empty or every point in one place
+  const size = THREE.MathUtils.clamp(big * CREATURE.worldPerMm, CREATURE.minSize, CREATURE.maxSize);
   g.scale(size / big, size / big, size / big); g.computeBoundingBox();
   const b = g.boundingBox!, c = b.getCenter(new THREE.Vector3()); g.translate(-c.x, -b.min.y, -c.z);   // centred, feet on y = 0
   g = toCreasedNormals(g, THREE.MathUtils.degToRad(CREATURE.crease));
@@ -33,7 +43,7 @@ export function creatureModel(bytes: ArrayBuffer): CreatureModel {
 /** The toy-toon look: 3 hard light bands, its own candy colour, the boiling cream ink outline.
  *  It starts asleep in grey; wake(t) makes its colour climb from the feet to the top in blocky steps, with a bright band of blocks at the front. */
 export function creatureMesh(m: CreatureModel, colour: string): { mesh: THREE.Mesh; tick: Tick; wake: (t: number) => void } {
-  const W = CREATURE.wake, uOld = { value: new THREE.Color(CREATURE.asleep) }, uSweep = { value: -1 }, uH = { value: m.size.y }; let wokeAt = Infinity;
+  const W = CREATURE.wake, uOld = { value: new THREE.Color(CREATURE.asleep) }, uSweep = { value: -1 }, uH = { value: bodyHeight(m) }; let wokeAt = Infinity;
   const mat = new THREE.MeshToonMaterial({ color: colour, gradientMap: bands(D.toon.bands) });
   mat.onBeforeCompile = (sh) => { Object.assign(sh.uniforms, { uOld, uSweep, uH });
     sh.vertexShader = 'varying vec3 vLoc;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vLoc = position;');
