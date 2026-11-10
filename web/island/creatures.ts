@@ -2,9 +2,15 @@ import * as THREE from 'three';
 import { GROUND_Y, type Island } from '../look/island';
 import { CREATURE, bodyHeight, creatureMesh, creatureModel } from '../look/creature';
 import { spring, type Tick } from '../look/helpers';
+import { jobFor, measure, type Job } from '../look/roles';
+import { makeBubble } from '../look/bubbles';
+
+/** After waking up, a polywog stops to work out what it is: a thought bubble and a scan, then its job icon pops up, then it sets off. */
+export const ANALYSE = { after: 0.7, think: 1.6, iconFor: 1.8, scans: 2 };   // seconds after the colour has climbed; scans down its body
 
 /** Drop a Tinkercad STL anywhere on the page (or use the button) and it lands on the island as a creature that wanders about. */
-export function addCreatures(scene: THREE.Scene, island: Island, focus: () => THREE.Vector3): Tick {
+export function addCreatures(scene: THREE.Scene, camera: THREE.Camera, island: Island, focus: () => THREE.Vector3): Tick {
+  const jobs: Job[] = [];   // every polywog's job so far, so a new one can see what the island needs
   const ticks: Tick[] = [], spots: { x: number; z: number; r: number }[] = [], down = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);
   let n = 1, seed = 11; /* colour 0 is the toy cube's */ const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const floorAt = (x: number, y: number, z: number): number => { down.set(new THREE.Vector3(x, y + 0.4, z), DOWN); down.far = 40; return down.intersectObjects(island.solids(), false)[0]?.point.y ?? GROUND_Y; };
@@ -14,6 +20,10 @@ export function addCreatures(scene: THREE.Scene, island: Island, focus: () => TH
   function spawn(bytes: ArrayBuffer, name: string): void {
     const model = creatureModel(bytes), colour = CREATURE.colours[n++ % CREATURE.colours.length], { mesh, tick, wake } = creatureMesh(model, colour);
     const body = new THREE.Group(), g = new THREE.Group(); body.add(mesh); g.add(body); scene.add(g); ticks.push(tick);
+    const shape = measure(model.geo), head = new THREE.Object3D(); head.position.y = model.size.y + 0.1; g.add(head); const bubble = makeBubble(head, camera);
+    const reach = Math.max(model.size.x, model.size.z) * 0.62, scan = new THREE.Mesh(new THREE.RingGeometry(reach * 0.92, reach, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#fff6e6', transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+    scan.visible = false; g.add(scan);
+    let job: Job | null = null;
     // land on open ground near where you're looking
     const f = focus(); let start = onLand(f.x, f.z, 0.8);
     for (let i = 0; i < 40; i++) { const a = rnd() * 6.283, d = 0.5 + rnd() * (1 + i * 0.1), c = onLand(f.x + Math.cos(a) * d, f.z + Math.sin(a) * d, 0.8); if (open(c)) { start = c; break; } }
@@ -29,7 +39,15 @@ export function addCreatures(scene: THREE.Scene, island: Island, focus: () => TH
       if (!s.awake && t >= s.wakeT) { s.awake = true; wake(t); }
       const sinceWake = t - s.wakeT, shiver = s.landed && sinceWake > -W.shiver && sinceWake < 0;
       if (s.awake && sinceWake > W.sweep && s.hopT === 0 && s.vy === 0 && !s.target) { s.vy = 4.5; s.y += 0.01; s.hopT = 0.001; s.rest = 0.4; }   // first excited hop
-      if (s.landed && sinceWake > W.sweep + 0.6) {
+      // analysing: think, scan from head to feet, then the job icon pops up; only then does it set off
+      const A = ANALYSE, sinceA = sinceWake - W.sweep - A.after;
+      if (s.awake && sinceA >= 0 && sinceA < A.think) { if (sinceA < dt * 1.5) bubble.show('think', t);
+        const u = (sinceA / A.think) * A.scans % 1; scan.visible = true; scan.position.y = model.size.y * (1 - u) + 0.02; }
+      else scan.visible = false;
+      if (s.awake && sinceA >= A.think && !job) { job = jobFor(shape, jobs); jobs.push(job); bubble.show(job, t); console.info(`polywog: ${name} is a ${job}`); }
+      if (job && sinceA >= A.think + A.iconFor && sinceA < A.think + A.iconFor + dt * 1.5) bubble.show(null, t);
+      bubble.tick(t);
+      if (s.landed && job && sinceA > A.think + 0.6) {
         if (!s.target) { s.rest -= dt; if (s.rest < 0) { const a = rnd() * 6.283, d = 1 + rnd() * 3, c = onLand(s.x + Math.cos(a) * d, s.z + Math.sin(a) * d, 0.9); if (open(c)) s.target = c; else s.rest = 0.2; } }
         else { const dx = s.target.x - s.x, dz = s.target.y - s.z, d = Math.hypot(dx, dz);
           if (d < 0.1) { s.target = null; s.rest = 0.8 + rnd() * 2.5; }
