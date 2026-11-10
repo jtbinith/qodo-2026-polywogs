@@ -61,6 +61,11 @@ describe('what the island needs', () => {
     expect(jobFor(stick, Array(20).fill('courier'))).toBe('courier');
     expect(jobFor(tag, Array(20).fill('bridge'))).toBe('bridge');
   });
+  it("Qodo's example: a shape that's clearly a bridge stays a bridge even with 20 bridges already", () => {
+    const flatButSpiky: Shape = { size: 1, long: 1, flat: 0.04, fill: 0.5, pointy: 0.5 };      // bridge 0.9, fan 0.72 (Qodo's numbers)
+    const sc = scores(flatButSpiky); expect(sc.bridge - sc.fan).toBeGreaterThan(0.15);
+    expect(jobFor(flatButSpiky, Array(20).fill('bridge'))).toBe('bridge');
+  });
   it('a lonely bridge makes the next borderline flat-ish model its partner', () => {
     const flatish: Shape = { size: 1, long: 1.1, flat: 0.22, fill: 0.6, pointy: 0.1 };   // bridge and keeper score within a whisker
     const couriers: Job[] = ['courier', 'courier', 'courier', 'courier'];

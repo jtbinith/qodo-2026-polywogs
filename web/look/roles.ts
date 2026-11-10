@@ -97,11 +97,13 @@ export function scores(s: Shape): Record<Job, number> {
 }
 
 /** What the island needs: the mix it would like, and how hard a shortage nudges a close call. A nudge never beats a clear shape. */
-export const NEEDS = { mix: { courier: 0.35, keeper: 0.35, fan: 0.15, bridge: 0.15 } as Record<Job, number>, nudge: 0.3, lonelyBridge: 0.15 };
+export const NEEDS = { mix: { courier: 0.35, keeper: 0.35, fan: 0.15, bridge: 0.15 } as Record<Job, number>, nudge: 0.3, lonelyBridge: 0.15,
+  closeCall: 0.15 };   // only jobs within this much of the best shape score can be nudged; anything clearer keeps its job
 /** The job for a new polywog, given the jobs already on the island. Same shape + same island = same job on every device. */
 export function jobFor(s: Shape, island: Job[] = []): Job {
-  const sc = scores(s), total = island.length, best = { job: 'keeper' as Job, score: -Infinity };
+  const sc = scores(s), total = island.length, best = { job: 'keeper' as Job, score: -Infinity }, top = Math.max(...JOB_ORDER.map((j) => sc[j]));
   for (const j of JOB_ORDER) {                                           // fixed order, so ties always break the same way
+    if (sc[j] < top - NEEDS.closeCall) continue;                         // not a close call: the island's needs can't pick this job
     const share = total ? island.filter((x) => x === j).length / total : NEEDS.mix[j];
     let v = sc[j] + (total ? NEEDS.nudge * (NEEDS.mix[j] - share) : 0);
     if (j === 'bridge' && island.filter((x) => x === 'bridge').length % 2 === 1) v += NEEDS.lonelyBridge;   // a bridge on its own needs a partner
