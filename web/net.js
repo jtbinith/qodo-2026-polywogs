@@ -100,7 +100,7 @@ export function joinRoom({ room, id, name, size, onSignal }) {
   }
   function sendLayout() {
     if (s.leader !== id) return;
-    send('layout', { joins: s.joins });
+    send('layout', { from: id, joins: s.joins });
     emit('layout');
   }
   ch.on('broadcast', { event: 'push' }, ({ payload }) => onPush(payload));

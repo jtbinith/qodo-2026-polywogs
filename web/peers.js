@@ -13,6 +13,7 @@ const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 const DIRECT_CHUNK = 64 * 1024;
 const RELAY_CHUNK = 24 * 1024;   // keeps each relay message well under the server's size limit
 const RELAY_GAP = 45;            // ms between relay messages (stays under the server's rate limit)
+const KEY_TIMEOUT = 5000;        // ms to wait for a peer's public key before giving up on the relay
 const HIGH_WATER = 1 << 20;
 
 export function createPeers({ myId, table, signal, forceRelay = false }) {
