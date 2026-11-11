@@ -15,6 +15,10 @@ Every device in a room is a stranger: anyone with the room code can send anythin
 | `web/seal.js` | End-to-end encryption: ECDH P-256, HKDF, AES-256-GCM |
 | `web/check.js` | Checks for everything received from another device |
 | `tests/` | Unit tests and the two-browser test |
+| `docs/` | Requirements, architecture, threat model and test plan |
+
+## Docs
+Requirements: `docs/PRD.md`. Design and message types: `docs/ARCHITECTURE.md`. Threats: `docs/THREAT-MODEL.md`. Tests: `docs/TESTING.md`. Every ticket cites its PRD ID (for example S6) and every PR names the IDs it covers.
 
 ## Setup
 ```sh
