@@ -33,6 +33,15 @@ export function overlapCount(L, sizes, tol = 6) {
   return n;
 }
 
+// Is this a well-formed list of joins between known devices? Used on layouts received
+// from the network, which may be malformed or forged.
+export function isValidJoins(joins, ids) {
+  return Array.isArray(joins) && joins.every((j) => j && typeof j === 'object' &&
+    ids.includes(j.a) && ids.includes(j.b) && j.a !== j.b &&
+    Object.hasOwn(OPPOSITE, j.edgeA) && Object.hasOwn(OPPOSITE, j.edgeB) &&
+    Number.isFinite(j.alongA) && Number.isFinite(j.alongB));
+}
+
 // Add new joins. An old join between the same two devices is replaced. If the result
 // makes screens overlap or disagree, older joins touching the new devices are dropped
 // (oldest first) until the layout makes sense again: someone moved their device.

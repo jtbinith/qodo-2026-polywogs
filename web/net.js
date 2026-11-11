@@ -1,7 +1,7 @@
 // Room networking over Supabase Realtime: who is here, a shared clock, and joins.
 // The server only relays messages. One device (the earliest to arrive) is the "time
 // keeper": everyone syncs their clock to it, and it decides which orb pushes pair up.
-import { addJoins, matchPushes } from './layout.js';
+import { addJoins, matchPushes, isValidJoins } from './layout.js';
 
 const SUPABASE_URL = 'https://aimoujzdcaxkejraattw.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_D8DGNTiXWHRFaoE2ae3ACg_8G8Y_yDS'; // public by design
@@ -100,11 +100,16 @@ export function joinRoom({ room, id, name, size, onSignal }) {
   }
   function sendLayout() {
     if (s.leader !== id) return;
-    send('layout', { joins: s.joins });
+    send('layout', { from: id, joins: s.joins });
     emit('layout');
   }
   ch.on('broadcast', { event: 'push' }, ({ payload }) => onPush(payload));
-  ch.on('broadcast', { event: 'layout' }, ({ payload }) => { if (s.leader !== id) { s.joins = payload.joins; emit('layout'); } });
+  ch.on('broadcast', { event: 'layout' }, ({ payload }) => {
+    // only the current leader's layout counts, and only if it is well-formed
+    if (s.leader === id || payload?.from !== s.leader) return;
+    if (!isValidJoins(payload.joins, [...Object.keys(s.peers), id])) return;
+    s.joins = payload.joins; emit('layout');
+  });
   for (const ev of ['joined', 'retry', 'nomatch']) ch.on('broadcast', { event: ev }, ({ payload }) => emit(ev, payload));
 
   s.push = (edge, along) => {
