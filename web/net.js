@@ -2,6 +2,7 @@
 // The server only relays messages. One device (the earliest to arrive) is the "time
 // keeper": everyone syncs their clock to it, and it decides which orb pushes pair up.
 import { addJoins, matchPushes, isValidJoins } from './layout.js';
+import { validPeerMeta, validPing, validPong, validDevList, validDev, validSignal } from './check.js';
 
 const SUPABASE_URL = 'https://aimoujzdcaxkejraattw.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_D8DGNTiXWHRFaoE2ae3ACg_8G8Y_yDS'; // public by design
@@ -40,6 +41,7 @@ export function joinRoom({ room, id, name, size, onSignal }) {
     s.peers = {};
     for (const [key, metas] of Object.entries(st)) {
       const m = metas[metas.length - 1];
+      if (!validPeerMeta(m)) continue;                        // a device that describes itself badly isn't counted
       s.peers[key] = { name: m.name, w: m.w, h: m.h, joinedAt: m.joinedAt };
     }
     // forget joins to devices that have left, so layouts never mention absent devices
@@ -51,10 +53,10 @@ export function joinRoom({ room, id, name, size, onSignal }) {
 
   // --- clock sync: NTP-style ping/pong with the time keeper ---
   ch.on('broadcast', { event: 'ping' }, ({ payload }) => {
-    if (s.leader === id && payload.to === id) send('pong', { to: payload.from, t0: payload.t0, t1: s.now() });
+    if (validPing(payload) && s.leader === id && payload.to === id) send('pong', { to: payload.from, t0: payload.t0, t1: s.now() });
   });
   ch.on('broadcast', { event: 'pong' }, ({ payload }) => {
-    if (payload.to !== id) return;
+    if (!validPong(payload) || payload.to !== id) return;
     const t2 = wall(), rtt = t2 - payload.t0;
     s.samples.push({ rtt, off: payload.t1 - (payload.t0 + t2) / 2 });
     if (s.samples.length > 30) s.samples.shift();
@@ -129,7 +131,9 @@ export function joinRoom({ room, id, name, size, onSignal }) {
     if (!isValidJoins(payload.joins, [...Object.keys(s.peers), id])) return;
     s.joins = payload.joins; emit('layout');
   });
-  for (const ev of ['joined', 'retry', 'nomatch']) ch.on('broadcast', { event: ev }, ({ payload }) => emit(ev, payload));
+  ch.on('broadcast', { event: 'joined' }, ({ payload }) => { if (isValidJoins([payload], [...Object.keys(s.peers), id])) emit('joined', payload); });
+  ch.on('broadcast', { event: 'retry' }, ({ payload }) => { if (validDevList(payload)) emit('retry', payload); });
+  ch.on('broadcast', { event: 'nomatch' }, ({ payload }) => { if (validDev(payload)) emit('nomatch', payload); });
 
   s.push = (edge, along) => {
     const p = { dev: id, edge, along, t: s.now() };
@@ -137,7 +141,7 @@ export function joinRoom({ room, id, name, size, onSignal }) {
     onPush(p);
   };
   s.resize = (w, h) => { if (s.status === 'live') ch.track({ name, w, h, joinedAt }); };
-  if (onSignal) ch.on('broadcast', { event: 'sig' }, ({ payload }) => { if (payload.to === id) onSignal(payload.from, payload.data); });
+  if (onSignal) ch.on('broadcast', { event: 'sig' }, ({ payload }) => { if (validSignal(payload) && payload.to === id) onSignal(payload.from, payload.data); });
   s.signal = (to, data) => send('sig', { from: id, to, data });
   s.on = (f) => s.listeners.add(f);
   s.leave = () => { clearInterval(pingTimer); client.removeChannel(ch); };

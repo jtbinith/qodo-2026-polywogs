@@ -40,7 +40,7 @@
 import { joinRoom } from './net.js';
 import { solveLayout } from './layout.js';
 import { createPeers } from './peers.js';
-import { LIMITS, validPrint, validMove, validChunk, validMissing, isPid, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
+import { LIMITS, validPrint, validMove, validChunk, validPidMsg, validNeed, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
 
 const $ = (id) => document.getElementById(id);
 const cv = $('c'), ctx = cv.getContext('2d');
@@ -163,13 +163,13 @@ function onMessage(from, m, bytes) {
     if (!validMove(m)) return;
     const p = prints.get(m.pid); if (p && drag?.p !== p) { p.anchor = m.anchor; p.x = m.x; p.y = m.y; }
   } else if (m.t === 'want') {           // someone wants the full photo
-    const file = isPid(m.pid) && files.get(m.pid);
+    const file = validPidMsg(m) && files.get(m.pid);
     if (file) peers.sendFile(from, m.pid, file);
   } else if (m.t === 'have') {           // someone now holds the bytes
-    const p = isPid(m.pid) && prints.get(m.pid);
+    const p = validPidMsg(m) && prints.get(m.pid);
     if (p && !p.holders.includes(from) && p.holders.length < 50) p.holders.push(from);
   } else if (m.t === 'need') {           // receiver is missing pieces (null = all): resend them
-    if (typeof m.fid !== 'string' || !validMissing(m.missing)) return;
+    if (!validNeed(m)) return;
     const pid = m.fid.startsWith('thumb:') ? m.fid.slice(6) : m.fid;
     const thumb = prints.get(pid)?.thumb;
     const src = m.fid.startsWith('thumb:') ? (thumb && new Blob([thumb])) : files.get(pid);
@@ -183,6 +183,7 @@ function onMessage(from, m, bytes) {
     if (!inc.parts[m.i]) { inc.parts[m.i] = bytes.slice(); inc.got++; }
     if (inc.got === inc.n) { incoming.delete(m.fid); done(m.fid, inc.parts); }
   }
+  // any other message type has no check, so it is dropped
 }
 async function done(fid, parts) {
   if (fid.startsWith('thumb:')) {
@@ -304,7 +305,7 @@ function start(room) {
   net = joinRoom({ room: 'photo-' + room, id, name, size: { w: W, h: H }, onSignal: (from, d) => peers.onSignal(from, d) });
   peers = createPeers({ myId: id, table: room, signal: (to, d) => net.signal(to, d), forceRelay: params.has('relay') });
   peers.on((from, m, bytes) => {
-    if (m.t === 'dropcheck') { const p = prints.get(m.pid); if (p) dropped(p); return; }
+    if (m.t === 'dropcheck') { const p = validPidMsg(m) && prints.get(m.pid); if (p) dropped(p); return; }
     onMessage(from, m, bytes);
   });
   const known = new Set();
@@ -322,7 +323,7 @@ function start(room) {
   net.on((ev) => {
     if (ev === 'joined') toast('Screens joined ✨');
   });
-  window.__t = { net, peers, prints, files, incoming, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
+  window.__t = { net, peers, prints, files, incoming, expect, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
 }
 // Only codes made by New room are accepted: a hand-typed code like TEST is easy to guess.
 function tryStart(code) {

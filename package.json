@@ -1,0 +1,15 @@
+{
+  "name": "qodo-hack-2026",
+  "private": true,
+  "type": "module",
+  "description": "Share photos between any devices in the same room, in the browser.",
+  "scripts": {
+    "serve": "node tests/serve.mjs",
+    "test:unit": "node --test tests/check.test.mjs",
+    "test:browsers": "node tests/two-browser.mjs && node tests/two-browser.mjs --relay",
+    "test": "npm run test:unit && npm run test:browsers"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

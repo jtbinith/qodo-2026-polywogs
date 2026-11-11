@@ -1,5 +1,6 @@
 // Checks for messages from other devices. Anyone who knows a room code can send anything,
-// so nothing from the network is trusted until it passes these checks.
+// so every kind of message has a check here and nothing is used until it passes. A message
+// without a check is dropped.
 
 export const LIMITS = {
   fileBytes: 200 * 1024 * 1024,  // biggest file we'll accept (held in memory while it arrives)
@@ -59,3 +60,37 @@ export function validMissing(list) {
 // (50 bits), so nobody can guess or list them. Hand-typed short codes are refused.
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const isRoomCode = (c) => typeof c === 'string' && /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{10}$/.test(c);
+
+// File ids on the wire: a print id, or "thumb:" + a print id for its thumbnail.
+export const isFid = (v) => isPid(v) || (typeof v === 'string' && v.startsWith('thumb:') && isPid(v.slice(6)));
+
+// want / have / dropcheck carry just a print id.
+export const validPidMsg = (m) => !!m && isPid(m.pid);
+export const validNeed = (m) => !!m && isFid(m.fid) && validMissing(m.missing) && (m.cs === undefined || LIMITS.chunkSizes.includes(m.cs));
+
+// What a device says about itself when it joins the room (presence).
+export const validPeerMeta = (m) => !!m && isStr(m.name, 40) && isNum(m.w, 20000) && m.w >= 100 && isNum(m.h, 20000) && m.h >= 100 && isNum(m.joinedAt, 1e15);
+
+// Clock sync with the time keeper.
+export const validPing = (p) => !!p && isDevId(p.from) && isDevId(p.to) && isNum(p.t0, 1e15);
+export const validPong = (p) => !!p && isDevId(p.to) && isNum(p.t0, 1e15) && isNum(p.t1, 1e15);
+
+// Join results the time keeper announces.
+export const validDevList = (p) => !!p && Array.isArray(p.devs) && p.devs.length <= 50 && p.devs.every(isDevId);
+export const validDev = (p) => !!p && isDevId(p.dev);
+
+// Connection setup and relayed frames (exactly one kind per message).
+const B64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const isB64 = (v, max) => typeof v === 'string' && v.length <= max && B64.test(v);
+export function validSignal(env) {
+  if (!env || !isDevId(env.from) || !isDevId(env.to) || !env.data || typeof env.data !== 'object') return false;
+  const d = env.data, kinds = ['pub', 'r', 'desc', 'cand'].filter((k) => k in d);
+  if (kinds.length !== 1) return false;
+  switch (kinds[0]) {
+    case 'pub': return isB64(d.pub, 200) && (d.reply === undefined || d.reply === true);
+    case 'r': return isB64(d.r, 128 * 1024);
+    case 'desc': return !!d.desc && (d.desc.type === 'offer' || d.desc.type === 'answer') && typeof d.desc.sdp === 'string' && d.desc.sdp.length <= 20000;
+    case 'cand': return !!d.cand && typeof d.cand.candidate === 'string' && d.cand.candidate.length <= 2000;
+  }
+  return false;
+}
