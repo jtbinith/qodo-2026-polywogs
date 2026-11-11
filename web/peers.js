@@ -13,11 +13,11 @@ const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 const DIRECT_CHUNK = 64 * 1024;
 const RELAY_CHUNK = 24 * 1024;   // keeps each relay message well under the server's size limit
 const RELAY_GAP = 45;            // ms between relay messages (stays under the server's rate limit)
-const KEY_TIMEOUT = 5000;        // ms to wait for a peer's public key before giving up on the relay
+const HOLD = 400;                // relay frames held per peer while its key is on the way (each ≤ 24 KB)
 const HIGH_WATER = 1 << 20;
 
 export function createPeers({ myId, table, signal, forceRelay = false }) {
-  const links = {};   // peer id -> { pc, dc, open, polite, makingOffer, ignoreOffer, key, keyReady, gotKey }
+  const links = {};   // peer id -> { pc, dc, open, polite, makingOffer, ignoreOffer, pending, key, keyFailed, outbox, inbox }
   const handlers = new Set();
   const emit = (from, msg, bytes) => handlers.forEach((f) => f(from, msg, bytes));
   const mine = makeKeyPair();
@@ -26,9 +26,9 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     if (links[peer]) return links[peer];
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const L = links[peer] = { pc, dc: null, open: false, polite: myId < peer, makingOffer: false, ignoreOffer: false, pending: [] };
-    const keyWait = new Promise((r) => (L.gotKey = r));
-    // resolves when the key arrives or after a timeout, so one silent peer can't stall the relay queue
-    L.keyReady = Promise.race([keyWait, new Promise((r) => setTimeout(r, KEY_TIMEOUT))]);
+    // Frames for or from this peer wait here until its key arrives. They never sit in the
+    // shared relay queue, so one silent peer can't hold up anyone else.
+    L.outbox = []; L.inbox = [];
     mine.then(({ pub }) => signal(peer, { pub: b64(pub) }));     // swap public keys
     const attach = (dc) => {
       L.dc = dc;
@@ -62,12 +62,11 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
         L.keyFailed = true;                 // malformed key: stop waiting on this peer
         console.warn('bad key from', from, e);
       }
-      L.gotKey();
+      keyArrived(from, L);
     } else if (data.r) {                    // relayed, encrypted frame
-      await L.keyReady;
-      let frame;
-      try { frame = await open(L.key, unb64(data.r), from, myId); } catch { return; } // tampered or not for us
-      onFrame(from, frame);
+      if (L.keyFailed) return;
+      if (!L.key) { if (L.inbox.length < HOLD) L.inbox.push(data.r); return; }
+      await openRelayed(from, L, data.r);
     } else if (data.desc) {
       const collision = data.desc.type === 'offer' && (L.makingOffer || pc.signalingState !== 'stable');
       L.ignoreOffer = !L.polite && collision;
@@ -102,17 +101,34 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     return buf;
   }
 
+  async function openRelayed(from, L, r) {
+    let frame;
+    try { frame = await open(L.key, unb64(r), from, myId); } catch { return; } // tampered or not for us
+    onFrame(from, frame);
+  }
+  // A peer's key has arrived (or turned out bad): deliver what was waiting for it.
+  async function keyArrived(peer, L) {
+    const out = L.outbox.splice(0), inb = L.inbox.splice(0);
+    if (!L.key) { out.forEach((o) => o.done()); return; } // bad key: drop, but don't leave senders hanging
+    for (const o of out) enqueue(peer, L, o.buf).then(o.done);
+    for (const r of inb) await openRelayed(peer, L, r);
+  }
+
   // One relay queue for the whole page, paced so we don't trip the server's rate limit.
+  // Only frames whose key is ready go in it.
   let relayTail = Promise.resolve();
-  function relay(peer, buf) {
-    const L = link(peer);
+  function enqueue(peer, L, buf) {
     relayTail = relayTail.then(async () => {
-      await L.keyReady;
-      if (!L.key) return;                   // no usable key for this peer: drop instead of blocking the queue
       signal(peer, { r: b64(await seal(L.key, buf, myId, peer)) });
       await new Promise((r) => setTimeout(r, RELAY_GAP));
     });
     return relayTail;
+  }
+  function relay(peer, buf) {
+    const L = link(peer);
+    if (L.keyFailed) return Promise.resolve();
+    if (L.key) return enqueue(peer, L, buf);
+    return new Promise((done) => { if (L.outbox.length < HOLD) L.outbox.push({ buf, done }); else done(); });
   }
 
   async function sendFrame(peer, buf) {

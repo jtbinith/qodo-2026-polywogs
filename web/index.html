@@ -35,11 +35,12 @@
   <small>Make a code with New room, then type it on every device.<br>Test only: anyone with the code can see the photos.</small>
 </form></div>
 <script src="vendor/supabase.js"></script>
+<script src="vendor/sha256.umd.min.js"></script>
 <script type="module">
 import { joinRoom } from './net.js';
 import { solveLayout } from './layout.js';
 import { createPeers } from './peers.js';
-import { LIMITS, validPrint, validMove, validChunk, validMissing, isPid, isRoomCode, CODE_ALPHABET } from './check.js';
+import { LIMITS, validPrint, validMove, validChunk, validMissing, isPid, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
 
 const $ = (id) => document.getElementById(id);
 const cv = $('c'), ctx = cv.getContext('2d');
@@ -123,9 +124,9 @@ $('pick').onchange = async (e) => {
   let added = 0;
   for (const file of list) {
     if (file.size > LIMITS.fileBytes) { toast(`${file.name} is too big`); continue; }
-    const pid = pidOf(), thumb = await thumbOf(file);
+    const pid = pidOf(), thumb = await thumbOf(file), sha = await sha256Hex(file); // receivers check the file against this
     const w = 150, h = thumb ? 150 : 110;
-    const p = { pid, owner: id, name: file.name.slice(0, 200) || 'file', type: file.type.slice(0, 100), size: file.size,
+    const p = { pid, owner: id, name: file.name.slice(0, 200) || 'file', type: file.type.slice(0, 100), size: file.size, sha,
       anchor: id, x: 40 + Math.random() * Math.max(10, W - 230), y: 70 + Math.random() * Math.max(10, H - 300),
       w, h, rot: (Math.random() - 0.5) * 0.3, img: await imgFrom(thumb), thumb, holders: [id] };
     prints.set(pid, p); files.set(pid, file); added++;
@@ -140,7 +141,7 @@ const announced = new Map(); // pid -> devices we've announced it to
 const sentTo = (pid) => announced.get(pid) || announced.set(pid, new Set()).get(pid);
 function announce(peer, p) {
   sentTo(p.pid).add(peer);
-  const { img, thumb, ...meta } = p;
+  const { img, thumb, lastSource, ...meta } = p;
   peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 });
   if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb]));
 }
@@ -190,6 +191,14 @@ async function done(fid, parts) {
     return;
   }
   const p = prints.get(fid); if (!p) return;
+  // the bytes must match the fingerprint announced with the print, or it isn't the photo
+  if (await sha256Hex(parts) !== p.sha) {
+    const from = p.holders.find((k) => k !== id && net.peers[k] && k !== p.lastSource);
+    p.holders = p.holders.filter((k) => k !== p.lastSource);   // stop trusting that source
+    toast(from ? 'That copy was damaged. Trying another' : 'That copy was damaged. Drag it again to retry');
+    if (from) { p.lastSource = from; expect(p.pid, from, p.size); peers.send(from, { t: 'want', pid: p.pid }); }
+    return;
+  }
   const file = new File(parts, p.name, { type: p.type, lastModified: Date.now() });
   files.set(fid, file);
   if (!p.holders.includes(id)) p.holders.push(id);
@@ -226,6 +235,7 @@ function dropped(p) {
   const [x, y] = world(p);
   if (screenAt(x + p.w / 2, y + p.h / 2) === id && !files.has(p.pid) && !incoming.has(p.pid)) {
     const src = p.holders.find((k) => k !== id && net.peers[k]) || p.owner;
+    p.lastSource = src;
     expect(p.pid, src, p.size);
     peers.send(src, { t: 'want', pid: p.pid });
     toast('Receiving…');

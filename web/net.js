@@ -42,6 +42,8 @@ export function joinRoom({ room, id, name, size, onSignal }) {
       const m = metas[metas.length - 1];
       s.peers[key] = { name: m.name, w: m.w, h: m.h, joinedAt: m.joinedAt };
     }
+    // forget joins to devices that have left, so layouts never mention absent devices
+    s.joins = s.joins.filter((j) => s.peers[j.a] && s.peers[j.b]);
     electLeader();
     if (s.leader === id) sendLayout();
     emit('peers', s.peers);

@@ -15,11 +15,12 @@ const isNum = (v, lim = 1e6) => Number.isFinite(v) && Math.abs(v) <= lim;
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 export const isPid = (v) => typeof v === 'string' && /^[0-9a-f]{16}$/.test(v);
 export const isDevId = (v) => isStr(v, 40);
+export const isSha = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
 export function validPrint(m) {
   return !!m && isPid(m.pid) && isDevId(m.owner) && isDevId(m.anchor) &&
     isStr(m.name, 200) && typeof m.type === 'string' && m.type.length <= 100 &&
-    isInt(m.size, 0, LIMITS.fileBytes) && isInt(m.thumbSize ?? 0, 0, LIMITS.thumbBytes) &&
+    isInt(m.size, 0, LIMITS.fileBytes) && isInt(m.thumbSize ?? 0, 0, LIMITS.thumbBytes) && isSha(m.sha) &&
     isNum(m.x) && isNum(m.y) && isNum(m.w, 400) && m.w >= 40 && isNum(m.h, 400) && m.h >= 40 &&
     isNum(m.rot, Math.PI) &&
     Array.isArray(m.holders) && m.holders.length <= 50 && m.holders.every(isDevId);
@@ -31,12 +32,23 @@ export const validMove = (m) => !!m && isPid(m.pid) && isDevId(m.anchor) && isNu
 export const pieceCount = (size, cs) => Math.ceil(size / cs) || 1;
 
 // A piece is only accepted for a transfer we asked for, from the device we asked, with a
-// piece size, count and index that fit the size we were told to expect.
+// piece size, count and index that fit the size we were told to expect, and exactly the
+// length that piece must have (every piece is full except possibly the last).
 export function validChunk(m, bytes, expect) {
   if (!expect || !LIMITS.chunkSizes.includes(m.cs)) return false;
   if (!isInt(m.n, 1, 1e6) || m.n !== pieceCount(expect.size, m.cs)) return false;
   if (!isInt(m.i, 0, m.n - 1)) return false;
-  return bytes instanceof Uint8Array && bytes.length <= m.cs;
+  const want = m.i < m.n - 1 ? m.cs : expect.size - m.cs * (m.n - 1);
+  return bytes instanceof Uint8Array && bytes.length === want;
+}
+
+// SHA-256 of a list of byte arrays (or a File/Blob), streamed so big files stay out of memory.
+export async function sha256Hex(src) {
+  const h = await hashwasm.createSHA256();
+  h.init();
+  if (Array.isArray(src)) for (const part of src) h.update(part);
+  else for (let off = 0; off < src.size; off += 4 << 20) h.update(new Uint8Array(await src.slice(off, off + (4 << 20)).arrayBuffer()));
+  return h.digest('hex');
 }
 
 export function validMissing(list) {
