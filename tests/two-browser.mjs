@@ -55,34 +55,57 @@ try {
   await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 2);
   check(true, 'the other device sees 3 prints with 2 thumbnails');
 
-  // drag photo-0 and the video onto B's screen
-  for (const i of [0, 2]) await A.evaluate((i) => {
-    const t = window.__t, p = [...t.prints.values()].filter((p) => p.owner === t.id)[i];
-    const other = Object.keys(t.net.peers).find((k) => k !== t.id), o = t.layout.pos[other];
-    t.setWorld(p, o[0] + 60, o[1] + 150 + i * 60);
-    t.peers.send(other, { t: 'move', pid: p.pid, anchor: p.anchor, x: p.x, y: p.y, final: true });
-    t.peers.send(other, { t: 'dropcheck', pid: p.pid });
-  }, i);
+  // drag photo-0 and the video onto B's screen with the mouse: press on the print, move past
+  // A's right edge (B's screen is joined there) and let go
+  async function drag(page, name, toX) {   // toX: where to let go, in this page's screen x (beyond its right edge = the joined screen)
+    const at = await page.evaluate((name) => {
+      const t = window.__t, p = [...t.prints.values()].find((p) => p.name === name), [wx, wy] = t.world(p), me = t.layout.pos[t.id];
+      return { x: wx - me[0] + p.w / 2, y: wy - me[1] + p.h / 2 };
+    }, name);
+    await page.mouse.move(at.x, at.y); await page.mouse.down();
+    for (let k = 1; k <= 12; k++) await page.mouse.move(at.x + ((toX - at.x) * k) / 12, at.y);
+    await page.mouse.up();
+  }
+  await drag(A, 'photo-0.jpg', 900 + 150);   // the middle of B's screen
+  await drag(A, 'clip.mp4', 900 + 150);
+  const before = await B.evaluate(() => window.__t.prints.size);
   await until(B, () => window.__t.files.size === 2, null, 60000);
   const got = await B.evaluate(() => Promise.all([...window.__t.files.values()].map(async (f) => [f.name, [...new Uint8Array(await f.arrayBuffer())]])));
   for (const [name, bytes] of got) check(sha(Buffer.from(bytes)) === sha(files.find((f) => f.name === name).buffer), `${name} arrived byte-identical`);
   const path = await A.evaluate(() => { const t = window.__t; return t.peers.path(Object.keys(t.net.peers).find((k) => k !== t.id)); });
   check(RELAY ? path === 'relay (encrypted)' : path === 'direct', `went ${path}`);
 
-  // a stranger's malformed messages are ignored
-  const before = await B.evaluate(() => window.__t.prints.size);
-  await A.evaluate(() => { const t = window.__t, k = Object.keys(t.net.peers).find((k) => k !== t.id);
-    t.peers.send(k, { t: 'print', pid: 'abc' });
-    t.peers.send(k, { t: 'chunk', fid: 'deadbeefdeadbeef', i: 0, n: 1e9, cs: 65536 });
-    t.peers.send(k, { t: 'need', fid: 'x', missing: 'all' }); });
-  await new Promise((r) => setTimeout(r, 1500));
-  check(await B.evaluate(() => window.__t.prints.size) === before, 'malformed messages ignored');
-
-  // a late guest still sees photos B holds after A (the owner) leaves
+  // a stranger's malformed messages change nothing, even when aimed at a real transfer
+  const ids = await A.evaluate(() => { const t = window.__t; return { a: t.id, b: Object.keys(t.net.peers).find((k) => k !== t.id) }; });
+  const FID = '0123456789abcdef';
+  await B.evaluate(([fid, from]) => window.__t.expect(fid, from, 50000), [FID, ids.a]);   // B is expecting this file from A
+  await B.evaluate(() => { const t = window.__t; t.sent = 0; const real = t.peers.sendFile; t.peers.sendFile = (...a) => { t.sent++; return real(...a); }; });
+  await A.evaluate(([fid, b]) => { const t = window.__t, junk = new Uint8Array(10), full = new Uint8Array(24576);
+    t.peers.send(b, { t: 'print', pid: 'abc' });                                                   // malformed print
+    t.peers.send(b, { t: 'want', pid: 'not-a-pid' });                                              // malformed request
+    t.peers.send(b, { t: 'need', fid: 'x', missing: 'all' });                                      // malformed resend request
+    t.peers.send(b, { t: 'need', fid: fid, missing: Array(1000).fill(0) });                         // resend request that is too big
+    t.peers.sendFile(b, fid, new Blob([junk]), [0], 24576);                                         // piece too short for a 50000-byte file
+    t.peers.sendFile(b, fid, new Blob([full]), [0], 1024);                                          // piece size that isn't allowed
+  }, [FID, ids.b]);
+  await new Promise((r) => setTimeout(r, 2000));
+  const after = await B.evaluate((fid) => { const t = window.__t, inc = t.incoming.get(fid); return { prints: t.prints.size, got: inc ? inc.got : -1, sent: t.sent }; }, FID);
+  check(after.prints === before, 'malformed print ignored');
+  check(after.got === 0, 'bad pieces for a real transfer were dropped');
+  check(after.sent === 0, 'malformed requests caused no resend');
+  // a late guest still gets photos B holds after A (the owner) leaves
   await A.context().close();
   const C = await device(390, 700);
   await until(C, () => window.__t && window.__t.prints.size >= 2, null, 45000);
-  check(true, 'late guest sees photos still held after the owner left');
+  check(true, 'late guest sees the photos still held after the owner left');
+  await until(B, () => Object.keys(window.__t.net.peers).length === 2, null, 45000);   // A has left B's view of the room
+  await Promise.all([B.evaluate(() => window.__t.net.push('R', 300)), C.evaluate(() => window.__t.net.push('L', 300))]);
+  await until(C, () => window.__t.net.joins.length === 1, null, 30000);
+  await drag(B, 'photo-0.jpg', 390 + 150);                                          // B drags its copy onto C
+  await until(C, () => window.__t.files.size === 1, null, 60000);
+  const [cname, cbytes] = await C.evaluate(async () => { const f = [...window.__t.files.values()][0]; return [f.name, [...new Uint8Array(await f.arrayBuffer())]]; });
+  const original = files.find((f) => f.name === cname);   // prints can overlap, so check whichever one was picked up
+  check(!!original && sha(Buffer.from(cbytes)) === sha(original.buffer), `late guest downloaded ${cname} from B byte-identical`);
 } catch (e) {
   check(false, e.message.split('\n')[0]);
 } finally {

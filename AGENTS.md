@@ -35,12 +35,12 @@ Builders follow these rules. Reviewers flag any change that breaks one, even if 
 
 ### Security and privacy
 
-**1. Nothing from another device is used until `check.js` accepts it** (the Stranger Rule)
-- **Rule:** nothing received from another device is used until a check in `web/check.js` has accepted it. New message types get a check there first. Unknown or malformed messages are dropped, never repaired.
-- **Where:** every handler of messages from other devices: `web/index.html`, `web/peers.js`, `web/net.js`.
+**1. Every message from another device is checked or dropped** (the Stranger Rule)
+- **Rule:** every kind of message another device can send (photos, moves, requests, file pieces, screen joins and connection setup) has a check in `web/check.js`. A message is used only after its check accepts it. If there's no check for it or the check fails, the message is dropped: never guessed at, repaired or half-used.
+- **Where:** every place that reads another device's data: `onMessage` in `web/index.html`, the room handlers in `web/net.js` (presence, clock, pushes, layouts, join results, signals) and `onSignal` in `web/peers.js`.
 - **Why:** anyone with the room code is in the room. On Day 1 most review findings were one device able to crash, flood or stall the others by sending something unexpected.
 - **Breaks it:** `prints.set(m.pid, m)` straight from a message, without `validPrint(m)` first.
-- **Checked by:** `tests/check.test.mjs`; in review, any handler that uses a message before checking it.
+- **Checked by:** `tests/check.test.mjs` tests the checks themselves. `npm run test:browsers` sends malformed messages to a live device during a real transfer. In review: any handler that reads a message before its check and any new message type without one.
 
 **2. The room server only ever sees sealed bytes** (the Deaf Relay Rule)
 - **Rule:** the room server never sees photos, keys or filenames in readable form. Anything relayed is sealed with `web/seal.js` first: a fresh random IV per message, sender and receiver bound in as associated data. Secrets come from `crypto.getRandomValues`, never `Math.random`.
@@ -53,10 +53,10 @@ Builders follow these rules. Reviewers flag any change that breaks one, even if 
 ### Network reliability
 
 **3. No device can hold up anyone else** (the One Slow Phone Rule)
-- **Rule:** one slow, broken or hostile device must never stall anyone else. Work for each device is queued, capped and timed out on its own. Nothing waits forever on another device. Limits are named constants, not loose numbers: `LIMITS` in `web/check.js`, `HOLD` and `RELAY_GAP` in `web/peers.js`, `MAX_BATCH`, `PER_DEV` and `DEADLINE` in `web/net.js`.
+- **Rule:** one slow, broken or hostile device must never stall anyone else. Each device's work is capped and timed out on its own. Nothing waits forever on another device. The one shared queue is the relay's pacing, which keeps the room under the server's rate limit: only frames that are ready to send go in it, never work that is waiting on a device. Limits are named constants, not loose numbers: `LIMITS` in `web/check.js`, `HOLD` and `RELAY_GAP` in `web/peers.js`, `MAX_BATCH`, `PER_DEV` and `DEADLINE` in `web/net.js`.
 - **Where:** `web/peers.js` (links, keys, relay queues), `web/net.js` (pushes, layouts), transfers in `web/index.html`.
 - **Why:** phones drop off Wi-Fi, lock their screens and lag. On Day 1 a single bad key could block the relay for the whole room.
-- **Checked by:** review only for now: any wait without a cap or timeout, any queue shared between devices and any limit that isn't a named constant.
+- **Checked by:** review only for now: any wait without a cap or timeout, anything in the shared relay queue that waits on a device and any limit that isn't a named constant.
 
 **4. A file is kept only if it matches its fingerprint** (the Fingerprint Rule)
 - **Rule:** a received file is only kept if every piece is the expected length and the whole file matches the SHA-256 sent with its print. Otherwise it is thrown away and fetched again from someone else.
