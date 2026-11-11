@@ -1,5 +1,6 @@
-# Builds the site and publishes it to GitHub Pages whenever main changes.
-# Public on purpose: it's a static demo (no data, no accounts, nothing stored). Kids' models never leave their browser.
+# Publishes web/ to GitHub Pages whenever main changes.
+# Public on purpose: a static site. Photos never go to this site or any server in readable form:
+# they travel device to device, or through the room relay end-to-end encrypted.
 name: Deploy to GitHub Pages
 
 on:
@@ -21,16 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24   # LTS; the test runner (vitest) supports Node 22.12+, 24 and 26+, not 25
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: web
 
   deploy:
     needs: build

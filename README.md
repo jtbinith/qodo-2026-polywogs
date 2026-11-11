@@ -1,53 +1,23 @@
-# Polywogs
+# qodo-hack-2026
 
-What if the things kids build didn't just sit there?
+Share photos between any devices in the same room, in the browser. No app, no account.
 
-Polywogs is a glowing nature island where the models kids design in Tinkercad wake up as creatures called polywogs. But the island has a secret: it's a living computer, and the kids keep it running together.
+Devices join a room with a code and their screens join into one shared space. Photos appear as prints that everyone can see, and you drag the ones you want onto your own screen to get the full file.
 
-## Who it's for
+Live: https://jtbinith.github.io/qodo-hack-2026/
 
-Primary-age kids at a weekly coding club, the volunteers who run it, and their families. The kids already design 3D models in Tinkercad and code micro:bits in MakeCode. Polywogs brings the two together in one world.
+## How it works
 
-## Why
+- Rooms, screen joins and the shared clock run over Supabase Realtime (`web/net.js`, `web/layout.js`).
+- Files go device to device over WebRTC. If the network blocks that, they go through the room server, end-to-end encrypted (`web/peers.js`, `web/seal.js`).
+- Everything received from other devices is checked before use (`web/check.js`).
 
-A finished Tinkercad model is a strange kind of ending. A kid spends an hour on a cat, a rocket or a creature nobody has ever seen before, and then it just sits on the screen, or on a shelf once it's printed.
+## Limits
 
-Polywogs turns that ending into a beginning. Your model comes alive with a job that suits its shape: a long, thin one races glowing fireflies along the island's threads, a big round one guards its memories. Your micro:bit is your polywog's brain. Code it however you like, and the island reacts.
+- The room server could swap encryption keys (an active attack). There is no check for this yet.
+- Anyone with the room code can join the room.
+- Test with your own photos only.
 
-And nobody does it alone. Everyone's polywogs share one island. Push laptops together, or prop a parent's phone beside one, and the island stretches across all the screens, with fireflies hopping from one to the next. When the lily pads overflow and polywogs pile up in a wobbly heap, the whole club rushes to sort it out.
+Built for the [Qodo hackathon](https://hackathon.qodo.ai). This repo started as a different project (Polywogs); its history is kept.
 
-Along the way, kids pick up how a real computer works:
-
-| On the island | In a computer |
-|---|---|
-| The heart-tree | the processor |
-| Lily pads on the pond | memory |
-| Fireflies zipping along glowing threads | signals on wires |
-
-## Kids' safety
-
-Code names only, no kid accounts and no personal data. Families join from a phone with a room code. A volunteer can pause or remove anything.
-
-## Status
-
-Working now: the look guide and a test island. Coming next: polywogs, the heart-tree and the micro:bit.
-
-## How it's built
-
-Built for the Qodo "Build a Software Factory in 30 Days" hackathon. Every pull request is reviewed by Qodo, and over the month the project gains its own rules (AGENTS.md), a backlog in GitHub Issues and automated checks.
-
-## Run it
-
-Needs Node 24 (LTS) or 22.12+.
-
-```
-npm install
-npm run dev
-```
-
-- Look guide: http://127.0.0.1:5195/guide/
-- Test island: http://127.0.0.1:5195/island/
-
-## Licence
-
-MIT. Kids' models are never stored in this repo.
+Uses [supabase-js](https://github.com/supabase/supabase-js), [exifr](https://github.com/MikeKovarik/exifr) and [hash-wasm](https://github.com/Daninet/hash-wasm) (MIT), in `web/vendor/`.

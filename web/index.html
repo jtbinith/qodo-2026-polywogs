@@ -1,13 +1,387 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Polywogs</title>
-  <meta http-equiv="refresh" content="0; url=./island/" />
-  <style>html, body { margin: 0; height: 100%; background: #060a24; color: #fff6e6; font: 16px 'Courier New', monospace; display: grid; place-items: center; } a { color: #ffb347; }</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>qodo-hack-2026 · universal sharing</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #2b1d14; color: #f5ead8; overflow: hidden;
+    font-family: system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; overscroll-behavior: none; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 8px; top: calc(8px + env(safe-area-inset-top)); font: 12px/1.45 ui-monospace, monospace;
+    background: #0008; padding: 6px 9px; border-radius: 8px; white-space: pre; pointer-events: none; }
+  #bar { position: fixed; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; }
+  #bar label, #bar button { font-size: 16px; padding: 10px 14px; border-radius: 12px; border: 0; background: #ffd23f; color: #222; }
+  #bar input { display: none; }
+  #lobby { position: fixed; inset: 0; display: grid; place-items: center; background: #2b1d14; z-index: 5; }
+  #lobby form { display: grid; gap: 12px; text-align: center; }
+  #lobby input { font-size: 22px; width: 11ch; text-align: center; text-transform: uppercase; letter-spacing: 3px;
+    padding: 8px; border-radius: 12px; border: 2px solid #ffd23f; background: #3a281b; color: #fff; }
+  #lobby button { font-size: 18px; padding: 10px 20px; border-radius: 12px; border: 0; background: #ffd23f; color: #222; }
+  #toast { position: fixed; left: 50%; bottom: calc(70px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: #000b; padding: 8px 14px; border-radius: 10px; font-size: 15px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+</style>
 </head>
 <body>
-  <p>Opening the island… <a href="./island/">Go to the island</a> · <a href="./guide/">Look guide</a></p>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="toast"></div>
+<div id="bar"><label>＋ Photos<input id="pick" type="file" accept="image/*,video/*" multiple></label></div>
+<div id="lobby"><form id="f">
+  <div>Room code</div>
+  <input id="code" maxlength="10" autocomplete="off" required>
+  <button>Join</button>
+  <button type="button" id="new">New room</button>
+  <small>Make a code with New room, then type it on every device.<br>Test only: anyone with the code can see the photos.</small>
+</form></div>
+<script src="vendor/supabase.js"></script>
+<script src="vendor/sha256.umd.min.js"></script>
+<script type="module">
+import { joinRoom } from './net.js';
+import { solveLayout } from './layout.js';
+import { createPeers } from './peers.js';
+import { LIMITS, validPrint, validMove, validChunk, validMissing, isPid, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
+
+const $ = (id) => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+const rnd = new Uint32Array(2); crypto.getRandomValues(rnd);
+const id = rnd[0].toString(36) + rnd[1].toString(36);
+const NAMES = ['Comet', 'Pebble', 'Mango', 'Gecko', 'Noodle', 'Biscuit', 'Pickle', 'Waffle', 'Nova', 'Sprout'];
+const name = NAMES[rnd[0] % NAMES.length];
+const params = new URLSearchParams(location.search);
+$('code').value = (params.get('room') || '').toUpperCase();
+
+// A room code people can't guess: 10 characters from a 32-letter alphabet (50 bits).
+function newCode() {
+  const b = new Uint8Array(10);
+  crypto.getRandomValues(b);
+  return [...b].map((x) => CODE_ALPHABET[x & 31]).join('');
+}
+$('new').onclick = () => { $('code').value = newCode(); };
+
+let net = null, peers = null, W = innerWidth, H = innerHeight;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.opacity = 1; clearTimeout(toast.h); toast.h = setTimeout(() => (t.style.opacity = 0), 2400); }
+function resize() {
+  W = innerWidth; H = innerHeight;
+  cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+  net?.resize(W, H);
+}
+addEventListener('resize', resize); resize();
+
+// ---------- prints ----------
+// Every print on the table, mine and other people's. Positions are in world coordinates
+// (the shared space made by joining screens), so a print can sit across a seam.
+// { pid, owner, name, type, size, x, y, w, h, rot, img, file (if I hold the bytes), holders }
+const prints = new Map();
+const files = new Map();      // pid -> File (bytes I hold)
+const incoming = new Map();   // pid -> { parts: [], got, n }
+let layout = { pos: {}, group: {} }, sizes = {};
+const meWorld = () => layout.pos[id] || [0, 0];
+// A print's x, y are relative to the top-left of the screen it sits on (its anchor), so
+// joining screens (which can shift the shared coordinates) never makes prints jump.
+const world = (p) => { const o = layout.pos[p.anchor] || [0, 0]; return [o[0] + p.x, o[1] + p.y]; };
+const visible = (p) => (layout.group[p.anchor] || p.anchor) === (layout.group[id] || id);
+// A print whose screen has left the room moves to the screen with the smallest id in my
+// group (every device picks the same one), keeping its place clamped inside that screen.
+function rehome() {
+  const gid = layout.group[id] || id;
+  let host = null;
+  for (const k of Object.keys(sizes)) if ((layout.group[k] || k) === gid && (host === null || k < host)) host = k;
+  for (const p of prints.values()) {
+    if (sizes[p.anchor] || !host || (drag && drag.p === p)) continue;
+    p.anchor = host;
+    p.x = Math.max(0, Math.min(sizes[host].w - p.w, p.x));
+    p.y = Math.max(0, Math.min(sizes[host].h - p.h, p.y));
+  }
+}
+function setWorld(p, x, y) {
+  p.anchor = screenAt(x + p.w / 2, y + p.h / 2) || p.anchor; // re-anchor to the screen under its middle
+  const o = layout.pos[p.anchor] || [0, 0];
+  p.x = x - o[0]; p.y = y - o[1];
+}
+
+async function thumbOf(file) {
+  if (!file.type.startsWith('image/')) return null;
+  try {
+    const bmp = await createImageBitmap(file);
+    const s = 220 / Math.max(bmp.width, bmp.height);
+    const c = new OffscreenCanvas(Math.max(1, Math.round(bmp.width * s)), Math.max(1, Math.round(bmp.height * s)));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+    return new Uint8Array(await blob.arrayBuffer());
+  } catch { return null; } // can't decode it: it goes on the table without a picture
+}
+async function imgFrom(bytes) {
+  if (!bytes) return null;
+  try { return await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })); } catch { return null; }
+}
+const pidOf = () => { const b = new Uint8Array(8); crypto.getRandomValues(b); return [...b].map((x) => x.toString(16).padStart(2, '0')).join(''); };
+
+$('pick').onchange = async (e) => {
+  const list = [...e.target.files];
+  e.target.value = '';
+  let added = 0;
+  for (const file of list) {
+    if (file.size > LIMITS.fileBytes) { toast(`${file.name} is too big`); continue; }
+    const pid = pidOf(), thumb = await thumbOf(file), sha = await sha256Hex(file); // receivers check the file against this
+    const w = 150, h = thumb ? 150 : 110;
+    const p = { pid, owner: id, name: file.name.slice(0, 200) || 'file', type: file.type.slice(0, 100), size: file.size, sha,
+      anchor: id, x: 40 + Math.random() * Math.max(10, W - 230), y: 70 + Math.random() * Math.max(10, H - 300),
+      w, h, rot: (Math.random() - 0.5) * 0.3, img: await imgFrom(thumb), thumb, holders: [id] };
+    prints.set(pid, p); files.set(pid, file); added++;
+    broadcast((peer) => announce(peer, p));
+  }
+  if (added) toast(`${added} on the table`);
+};
+
+const others = () => Object.keys(net?.peers || {}).filter((k) => k !== id);
+const broadcast = (f) => others().forEach(f);
+const announced = new Map(); // pid -> devices we've announced it to
+const sentTo = (pid) => announced.get(pid) || announced.set(pid, new Set()).get(pid);
+function announce(peer, p) {
+  sentTo(p.pid).add(peer);
+  const { img, thumb, lastSource, ...meta } = p;
+  peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 });
+  if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb]));
+}
+
+// ---------- messages between devices ----------
+// Transfers we've asked for (or been told to expect): fid -> { from, size, parts, got, n, cs, last, asks }.
+// Pieces for anything else are dropped, so a stranger can't make us store data.
+function expect(fid, from, size) {
+  if (incoming.has(fid) || incoming.size >= LIMITS.incoming) return;
+  incoming.set(fid, { from, size, parts: null, got: 0, n: 0, cs: 0, last: performance.now(), asks: 0 });
+}
+function onMessage(from, m, bytes) {
+  if (m.t === 'print') {
+    if (prints.has(m.pid) || prints.size >= LIMITS.prints || !validPrint(m)) return;
+    const { t, thumbSize, ...meta } = m;
+    prints.set(m.pid, { ...meta, img: null, thumb: null });
+    if (thumbSize) expect('thumb:' + m.pid, from, thumbSize);
+  } else if (m.t === 'move') {
+    if (!validMove(m)) return;
+    const p = prints.get(m.pid); if (p && drag?.p !== p) { p.anchor = m.anchor; p.x = m.x; p.y = m.y; }
+  } else if (m.t === 'want') {           // someone wants the full photo
+    const file = isPid(m.pid) && files.get(m.pid);
+    if (file) peers.sendFile(from, m.pid, file);
+  } else if (m.t === 'have') {           // someone now holds the bytes
+    const p = isPid(m.pid) && prints.get(m.pid);
+    if (p && !p.holders.includes(from) && p.holders.length < 50) p.holders.push(from);
+  } else if (m.t === 'need') {           // receiver is missing pieces (null = all): resend them
+    if (typeof m.fid !== 'string' || !validMissing(m.missing)) return;
+    const pid = m.fid.startsWith('thumb:') ? m.fid.slice(6) : m.fid;
+    const thumb = prints.get(pid)?.thumb;
+    const src = m.fid.startsWith('thumb:') ? (thumb && new Blob([thumb])) : files.get(pid);
+    const cs = LIMITS.chunkSizes.includes(m.cs) ? m.cs : null;
+    if (src) peers.sendFile(from, m.fid, src, m.missing, m.missing ? cs : null);
+  } else if (m.t === 'chunk') {
+    const inc = incoming.get(m.fid);
+    if (!inc || inc.from !== from || !validChunk(m, bytes, inc)) return;
+    if (!inc.parts || inc.cs !== m.cs) { inc.parts = new Array(m.n); inc.got = 0; inc.n = m.n; inc.cs = m.cs; }
+    inc.last = performance.now();
+    if (!inc.parts[m.i]) { inc.parts[m.i] = bytes.slice(); inc.got++; }
+    if (inc.got === inc.n) { incoming.delete(m.fid); done(m.fid, inc.parts); }
+  }
+}
+async function done(fid, parts) {
+  if (fid.startsWith('thumb:')) {
+    const p = prints.get(fid.slice(6));
+    if (p) { p.thumb = new Uint8Array(await new Blob(parts).arrayBuffer()); p.img = await imgFrom(p.thumb); }
+    return;
+  }
+  const p = prints.get(fid); if (!p) return;
+  // the bytes must match the fingerprint announced with the print, or it isn't the photo
+  if (await sha256Hex(parts) !== p.sha) {
+    const from = p.holders.find((k) => k !== id && net.peers[k] && k !== p.lastSource);
+    p.holders = p.holders.filter((k) => k !== p.lastSource);   // stop trusting that source
+    toast(from ? 'That copy was damaged. Trying another' : 'That copy was damaged. Drag it again to retry');
+    if (from) { p.lastSource = from; expect(p.pid, from, p.size); peers.send(from, { t: 'want', pid: p.pid }); }
+    return;
+  }
+  const file = new File(parts, p.name, { type: p.type, lastModified: Date.now() });
+  files.set(fid, file);
+  if (!p.holders.includes(id)) p.holders.push(id);
+  broadcast((peer) => peers.send(peer, { t: 'have', pid: fid }));
+  toast(`Got ${p.name}. Tap it to save`);
+}
+
+// Ask again for pieces that went missing (relay messages can be dropped under load). If
+// nothing at all has arrived, ask for the whole file. Give up after a minute of silence.
+setInterval(() => {
+  for (const [fid, inc] of incoming) {
+    const idle = performance.now() - inc.last;
+    if (idle < 3000) continue;
+    if (inc.asks >= 20) { incoming.delete(fid); if (!fid.startsWith('thumb:')) toast('A photo didn’t arrive. Drag it again to retry'); continue; }
+    let missing = null;
+    if (inc.parts) { missing = []; for (let i = 0; i < inc.n && missing.length < LIMITS.missingPerAsk; i++) if (!inc.parts[i]) missing.push(i); }
+    inc.last = performance.now(); inc.asks++;
+    peers.send(inc.from, { t: 'need', fid, missing, cs: inc.cs || undefined });
+  }
+}, 1500);
+
+// Whose screen is a world point on?
+function screenAt(x, y) {
+  const gid = layout.group[id] || id;
+  for (const k of Object.keys(sizes)) {
+    if ((layout.group[k] || k) !== gid) continue;
+    const [px, py] = layout.pos[k] || [0, 0];
+    if (x >= px && x < px + sizes[k].w && y >= py && y < py + sizes[k].h) return k;
+  }
+  return null;
+}
+function dropped(p) {
+  // landed on my screen and I don't have it yet: ask the owner for the full photo
+  const [x, y] = world(p);
+  if (screenAt(x + p.w / 2, y + p.h / 2) === id && !files.has(p.pid) && !incoming.has(p.pid)) {
+    const src = p.holders.find((k) => k !== id && net.peers[k]) || p.owner;
+    p.lastSource = src;
+    expect(p.pid, src, p.size);
+    peers.send(src, { t: 'want', pid: p.pid });
+    toast('Receiving…');
+  }
+}
+
+// ---------- input: orb (join screens), prints (drag / tap to save) ----------
+const ORB = 26;
+const home = () => [W / 2, H - 120];
+let drag = null, orbDrag = null, ghosts = [];
+function hit(sx, sy) {
+  const [mx, my] = meWorld(), x = sx + mx, y = sy + my;
+  return [...prints.values()].reverse().find((p) => { if (!visible(p)) return false; const [px, py] = world(p); return x >= px && x <= px + p.w && y >= py && y <= py + p.h; });
+}
+cv.addEventListener('pointerdown', (e) => {
+  const [hx, hy] = home();
+  cv.setPointerCapture(e.pointerId);
+  if (Math.hypot(e.clientX - hx, e.clientY - hy) < ORB * 2) { orbDrag = { x: e.clientX, y: e.clientY }; return; }
+  const p = hit(e.clientX, e.clientY);
+  if (!p) return;
+  prints.delete(p.pid); prints.set(p.pid, p); // bring to top
+  const [ox, oy] = world(p);
+  drag = { p, sx: e.clientX, sy: e.clientY, ox, oy, moved: false };
+});
+let lastSend = 0;
+cv.addEventListener('pointermove', (e) => {
+  if (orbDrag) { orbDrag.x = e.clientX; orbDrag.y = e.clientY; return; }
+  if (!drag) return;
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if (Math.hypot(dx, dy) > 8) drag.moved = true;
+  setWorld(drag.p, drag.ox + dx, drag.oy + dy);
+  if (performance.now() - lastSend > 40) { lastSend = performance.now(); const p = drag.p; broadcast((k) => peers.send(k, { t: 'move', pid: p.pid, anchor: p.anchor, x: p.x, y: p.y })); }
+});
+cv.addEventListener('pointerup', (e) => {
+  if (orbDrag) { pushOrb(orbDrag.x, orbDrag.y); orbDrag = null; return; }
+  if (!drag) return;
+  const p = drag.p, moved = drag.moved; drag = null;
+  if (!moved) return save(p);   // a tap
+  broadcast((k) => peers.send(k, { t: 'move', pid: p.pid, anchor: p.anchor, x: p.x, y: p.y, final: true }));
+  broadcast((k) => peers.send(k, { t: 'dropcheck', pid: p.pid }));
+  dropped(p);
+});
+// Saving must happen inside the tap, with the file already in hand (iOS rule).
+function save(p) {
+  const file = files.get(p.pid);
+  if (!file) return toast(p.owner === id ? 'Yours' : 'Drag it onto your screen first');
+  if (p.owner === id) return toast('Already yours');
+  if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file] }).catch(() => {});
+  else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); }
+}
+function pushOrb(x, y) {
+  const [hx, hy] = home(), dx = x - hx, dy = y - hy;
+  if (Math.hypot(dx, dy) < Math.min(W, H) * 0.15) return;
+  let edge, along;
+  if (Math.abs(dx) / W > Math.abs(dy) / H) { edge = dx > 0 ? 'R' : 'L'; along = Math.max(0, Math.min(H, hy + dy * (((dx > 0 ? W : 0) - hx) / dx))); }
+  else { edge = dy > 0 ? 'B' : 'T'; along = Math.max(0, Math.min(W, hx + dx * (((dy > 0 ? H : 0) - hy) / dy))); }
+  const g = edge === 'R' ? [W, along] : edge === 'L' ? [0, along] : edge === 'B' ? [along, H] : [along, 0];
+  ghosts.push({ x: g[0], y: g[1], t: performance.now() });
+  net.push(edge, along);
+}
+
+// ---------- start ----------
+function start(room) {
+  $('lobby').remove();
+  history.replaceState(null, '', '?room=' + room);
+  net = joinRoom({ room: 'photo-' + room, id, name, size: { w: W, h: H }, onSignal: (from, d) => peers.onSignal(from, d) });
+  peers = createPeers({ myId: id, table: room, signal: (to, d) => net.signal(to, d), forceRelay: params.has('relay') });
+  peers.on((from, m, bytes) => {
+    if (m.t === 'dropcheck') { const p = prints.get(m.pid); if (p) dropped(p); return; }
+    onMessage(from, m, bytes);
+  });
+  const known = new Set();
+  net.on((ev) => {
+    if (ev !== 'peers') return;
+    for (const k of others()) if (!known.has(k)) { known.add(k); peers.connect(k); } // swap keys, try a direct link
+    // Catch everyone up. The owner announces its prints; once the owner has left, anyone
+    // still holding a print announces it. Re-checked on every change in who's here, because
+    // a device that closes can take a while to drop out of the room.
+    for (const p of prints.values()) {
+      if (!(p.owner === id || (!net.peers[p.owner] && files.has(p.pid)))) continue;
+      for (const k of others()) if (!sentTo(p.pid).has(k)) announce(k, p);
+    }
+  });
+  net.on((ev) => {
+    if (ev === 'joined') toast('Screens joined ✨');
+  });
+  window.__t = { net, peers, prints, files, incoming, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
+}
+// Only codes made by New room are accepted: a hand-typed code like TEST is easy to guess.
+function tryStart(code) {
+  code = code.trim().toUpperCase();
+  if (!isRoomCode(code)) return toast('Use New room to make a 10-letter code');
+  start(code);
+}
+$('f').onsubmit = (e) => { e.preventDefault(); tryStart($('code').value); };
+if (params.get('room') && params.has('auto')) tryStart(params.get('room'));
+
+// ---------- drawing ----------
+function frame() {
+  requestAnimationFrame(frame);
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.fillStyle = '#2b1d14'; ctx.fillRect(0, 0, W, H);
+  if (!net) return;
+  sizes = Object.fromEntries(Object.entries(net.peers).map(([k, p]) => [k, { w: p.w, h: p.h }]));
+  if (!sizes[id]) sizes[id] = { w: W, h: H };
+  layout = solveLayout(Object.keys(sizes), net.joins, sizes);
+  rehome();
+  const [mx, my] = meWorld(), gid = layout.group[id] || id;
+  ctx.save(); ctx.translate(-mx, -my);
+  // wood-grain-ish lines that run straight across joined screens
+  ctx.strokeStyle = '#3a281b'; ctx.lineWidth = 2;
+  for (let y = Math.floor(my / 46) * 46; y < my + H; y += 46) { ctx.beginPath(); ctx.moveTo(mx, y + Math.sin(y) * 4); ctx.lineTo(mx + W, y); ctx.stroke(); }
+  ctx.strokeStyle = '#7a5a3a'; ctx.setLineDash([6, 6]);
+  for (const k of Object.keys(sizes)) if (k !== id && layout.group[k] === gid) ctx.strokeRect(layout.pos[k][0] + 1, layout.pos[k][1] + 1, sizes[k].w - 2, sizes[k].h - 2);
+  ctx.setLineDash([]);
+  for (const p of prints.values()) {
+    if (!visible(p)) continue;
+    const [px, py] = world(p);
+    ctx.save();
+    ctx.translate(px + p.w / 2, py + p.h / 2); ctx.rotate(p.rot);
+    ctx.shadowColor = '#0008'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4;
+    ctx.fillStyle = '#fbf7ef'; ctx.fillRect(-p.w / 2 - 8, -p.h / 2 - 8, p.w + 16, p.h + 30); // polaroid frame
+    ctx.shadowColor = 'transparent';
+    if (p.img) {
+      const s = Math.min(p.w / p.img.width, p.h / p.img.height), iw = p.img.width * s, ih = p.img.height * s;
+      ctx.drawImage(p.img, -iw / 2, -ih / 2, iw, ih);
+    } else { ctx.fillStyle = '#333'; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.fillStyle = '#eee'; ctx.font = '14px system-ui'; ctx.textAlign = 'center'; ctx.fillText(p.type.startsWith('video') ? '▶ video' : p.name, 0, 4); }
+    ctx.fillStyle = '#5a4632'; ctx.font = '12px ui-monospace, monospace'; ctx.textAlign = 'center';
+    const mine = p.owner === id, have = files.has(p.pid);
+    ctx.fillText(mine ? (net.peers[p.owner]?.name || name) + ' (mine)' : have ? '✓ yours, tap to save' : (net.peers[p.owner]?.name || '?'), 0, p.h / 2 + 16);
+    ctx.restore();
+  }
+  ctx.restore();
+  // orb
+  const now = performance.now();
+  const glow = (x, y, r, a = 1) => { const g = ctx.createRadialGradient(x, y, 2, x, y, r); g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.35, `rgba(255,220,140,${a})`); g.addColorStop(1, 'rgba(255,180,80,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); };
+  ghosts = ghosts.filter((g) => now - g.t < 2500 && (glow(g.x, g.y, ORB * 2, 1 - (now - g.t) / 2500), true));
+  const [ox, oy] = orbDrag ? [orbDrag.x, orbDrag.y] : home();
+  glow(ox, oy, ORB * 2);
+  const n = Object.keys(net.peers).length;
+  $('hud').textContent = `table ${net.room.slice(6)} · ${name}${net.leader === id ? ' (time keeper)' : ''} · ${net.status}\n` +
+    `devices ${n} · joins ${net.joins.length} · prints ${prints.size} · held here ${files.size}\n` +
+    others().map((k) => `${net.peers[k].name}: ${peers.path(k)} (direct ${peers.state(k)})`).join('\n') +
+    `\ndrag the orb to an edge to join screens`;
+}
+frame();
+</script>
 </body>
 </html>

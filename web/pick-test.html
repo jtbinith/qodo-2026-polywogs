@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phototable pick/hash/share test</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 12px; }
+  button, label.btn { font-size: 16px; padding: 10px 14px; margin: 4px 4px 4px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  td, th { border: 1px solid #ccc; padding: 3px 5px; vertical-align: top; word-break: break-all; }
+  #env, #log { white-space: pre-wrap; font: 12px ui-monospace, monospace; background: #f4f4f4; padding: 6px; }
+  .dup { background: #ffe9b0; }
+</style>
+</head>
+<body>
+<h1>Phototable test</h1>
+<p>Pick photos/videos. Nothing leaves this device: all work is local in the page.</p>
+
+<input id="pick" type="file" accept="image/*,video/*" multiple>
+<label><input id="heicOnly" type="checkbox"> use accept="image/heic,image/heif,video/*" (ask iOS to keep HEIC)</label>
+<div>
+  <button id="share" disabled>Save via share sheet</button>
+  <button id="download" disabled>Download all (a[download])</button>
+</div>
+<div id="env"></div>
+<table id="out">
+  <thead><tr>
+    <th>#</th><th>name</th><th>type</th><th>size</th><th>lastModified</th>
+    <th>EXIF DateTimeOriginal</th><th>GPS</th><th>Make/Model</th>
+    <th>SHA-256 (WebCrypto, whole file)</th><th>SHA-256 (WASM, 4 MiB chunks)</th>
+    <th>dHash 64-bit</th><th>ms (exif/sha/wasm/dhash)</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+<div id="log"></div>
+
+<script src="vendor/exifr.full.umd.js"></script>
+<script src="vendor/sha256.umd.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const log = (...a) => { $("log").textContent += a.join(" ") + "\n"; };
+let picked = [];
+window.__results = [];   // read by the Playwright test
+
+// ---- environment report ----
+(function env() {
+  const e = [];
+  e.push("UA: " + navigator.userAgent);
+  e.push("secureContext: " + window.isSecureContext + "  crypto.subtle: " + !!(window.crypto && crypto.subtle));
+  e.push("navigator.share: " + !!navigator.share + "  canShare: " + !!navigator.canShare);
+  e.push("showOpenFilePicker: " + ("showOpenFilePicker" in window) + "  showDirectoryPicker: " + ("showDirectoryPicker" in window) +
+         "  webkitdirectory: " + ("webkitdirectory" in document.createElement("input")));
+  e.push("createImageBitmap: " + ("createImageBitmap" in window) + "  OffscreenCanvas: " + ("OffscreenCanvas" in window) +
+         "  OPFS: " + !!(navigator.storage && navigator.storage.getDirectory));
+  e.push("standalone (installed to home screen): " + (navigator.standalone === true || matchMedia("(display-mode: standalone)").matches));
+  if (performance.memory) e.push("JS heap limit: " + (performance.memory.jsHeapSizeLimit / 2**20).toFixed(0) + " MiB");
+  $("env").textContent = e.join("\n");
+  if (navigator.storage && navigator.storage.estimate) {
+    navigator.storage.estimate().then(q => {
+      $("env").textContent += "\nstorage quota: " + (q.quota / 2**30).toFixed(2) + " GiB, used " + (q.usage / 2**20).toFixed(1) + " MiB";
+      return navigator.storage.persisted ? navigator.storage.persisted() : null;
+    }).then(p => { if (p !== null) $("env").textContent += "  persisted: " + p; });
+  }
+})();
+
+$("heicOnly").addEventListener("change", (ev) => {
+  $("pick").accept = ev.target.checked ? "image/heic,image/heif,video/*" : "image/*,video/*";
+});
+
+// ---- hashing ----
+const hex = (buf) => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+
+async function sha256WebCrypto(file) {
+  // WebCrypto has no streaming API: the whole file must be in one ArrayBuffer.
+  return hex(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
+}
+
+async function sha256Chunked(file, chunk = 4 * 2**20) {
+  // Streaming hash: only one chunk in memory at a time. Works for multi-GB videos.
+  const h = await hashwasm.createSHA256();
+  h.init();
+  for (let off = 0; off < file.size; off += chunk) {
+    h.update(new Uint8Array(await file.slice(off, off + chunk).arrayBuffer()));
+  }
+  return h.digest("hex");
+}
+
+// ---- perceptual hash (dHash) ----
+async function decodeSmall(file) {
+  // Prefer createImageBitmap with resize (decodes straight to a small bitmap, little RAM).
+  try {
+    return await createImageBitmap(file, { resizeWidth: 64, resizeHeight: 64, resizeQuality: "medium" });
+  } catch (_) {}
+  // Fallback: <img> decode then canvas downscale.
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = 64; c.height = 64;
+    c.getContext("2d").drawImage(img, 0, 0, 64, 64);
+    return c;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function dHash(file) {
+  const src = await decodeSmall(file);       // 64x64
+  const c = document.createElement("canvas");
+  c.width = 9; c.height = 8;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, 9, 8);
+  if (src.close) src.close();
+  const d = ctx.getImageData(0, 0, 9, 8).data;
+  const g = (x, y) => { const i = (y * 9 + x) * 4; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
+  let bits = 0n;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) bits = (bits << 1n) | (g(x, y) > g(x + 1, y) ? 1n : 0n);
+  return bits.toString(16).padStart(16, "0");
+}
+const hamming = (a, b) => { let x = BigInt("0x" + a) ^ BigInt("0x" + b), n = 0; while (x) { n += Number(x & 1n); x >>= 1n; } return n; };
+
+// ---- per-file processing ----
+async function processFile(f, i) {
+  const r = { i, name: f.name, type: f.type || "(empty)", size: f.size, lastModified: new Date(f.lastModified).toISOString() };
+  const t = [];
+  let t0 = performance.now();
+  try {
+    const x = await exifr.parse(f, { tiff: true, exif: true, gps: true, xmp: false, icc: false, iptc: false });
+    r.dateTimeOriginal = x && x.DateTimeOriginal ? new Date(x.DateTimeOriginal).toISOString() : "none";
+    r.gps = x && (x.latitude !== undefined || x.GPSLatitude) ? `yes (${(+x.latitude).toFixed(4)}, ${(+x.longitude).toFixed(4)})` : "none";
+    r.makeModel = x ? [x.Make, x.Model].filter(Boolean).join(" ") || "none" : "none";
+  } catch (e) { r.dateTimeOriginal = "error: " + e.message; r.gps = "?"; r.makeModel = "?"; }
+  t.push(performance.now() - t0);
+
+  t0 = performance.now();
+  // Guard: WebCrypto whole-buffer only for files <= 64 MiB (avoid OOM on phones with 4K video).
+  r.sha256 = f.size <= 64 * 2**20 ? await sha256WebCrypto(f).catch(e => "error: " + e.message) : "skipped (>64 MiB)";
+  t.push(performance.now() - t0);
+
+  t0 = performance.now();
+  r.sha256wasm = await sha256Chunked(f).catch(e => "error: " + e.message);
+  t.push(performance.now() - t0);
+
+  t0 = performance.now();
+  r.dhash = f.type.startsWith("video/") ? "n/a (video)" : await dHash(f).catch(e => "decode failed: " + e.message);
+  t.push(performance.now() - t0);
+  r.ms = t.map(v => v.toFixed(0)).join(" / ");
+  return r;
+}
+
+function render(results) {
+  const tb = $("out").tBodies[0];
+  tb.innerHTML = "";
+  for (const r of results) {
+    const tr = tb.insertRow();
+    if (r.dupOf !== undefined) tr.className = "dup";
+    for (const v of [r.i, r.name, r.type, r.size, r.lastModified, r.dateTimeOriginal, r.gps, r.makeModel,
+                     r.sha256, r.sha256wasm, r.dhash + (r.dupOf !== undefined ? `  (near-dup of #${r.dupOf}, d=${r.dupDist})` : ""), r.ms]) {
+      tr.insertCell().textContent = String(v);
+    }
+  }
+}
+
+$("pick").addEventListener("change", async (ev) => {
+  picked = [...ev.target.files];
+  $("log").textContent = "";
+  log(`picked ${picked.length} file(s), total ${(picked.reduce((s, f) => s + f.size, 0) / 2**20).toFixed(1)} MiB`);
+  const results = [];
+  const T = performance.now();
+  for (let i = 0; i < picked.length; i++) {
+    results.push(await processFile(picked[i], i));
+    render(results);
+  }
+  // near-duplicate detection: Hamming distance <= 6 of 64 bits (flat/blank images give 0000.. and are ignored)
+  for (let a = 0; a < results.length; a++) for (let b = 0; b < a; b++) {
+    const A = results[a], B = results[b];
+    if (/^[0-9a-f]{16}$/.test(A.dhash) && /^[0-9a-f]{16}$/.test(B.dhash)) {
+      const d = hamming(A.dhash, B.dhash);
+      if (d <= 6 && A.dupOf === undefined && A.dhash !== "0000000000000000") { A.dupOf = b; A.dupDist = d; }
+    }
+  }
+  render(results);
+  log(`done in ${(performance.now() - T).toFixed(0)} ms`);
+  window.__results = results;
+  const ok = picked.length > 0;
+  $("share").disabled = !ok;
+  $("download").disabled = !ok;
+  if (ok && navigator.canShare) log("canShare({files}): " + navigator.canShare({ files: picked }));
+});
+
+// ---- saving ----
+// navigator.share must be called synchronously-ish inside the click (transient user activation).
+// Files are already in hand, so nothing async happens before share().
+$("share").addEventListener("click", async () => {
+  if (!navigator.share) { log("navigator.share not available here: use Download"); return; }
+  const data = { files: picked };
+  if (navigator.canShare && !navigator.canShare(data)) { log("canShare says no for these files (type/size/count)"); return; }
+  try {
+    await navigator.share(data);    // iOS: choose "Save N Images/Items" to put them in Photos
+    log("share sheet completed");
+  } catch (e) { log("share failed/cancelled: " + e.name + " " + e.message); }
+});
+
+$("download").addEventListener("click", async () => {
+  // Browsers may prompt "allow multiple downloads"; iOS Safari puts these in Files > Downloads, not Photos.
+  for (const f of picked) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(f);
+    a.download = f.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    await new Promise(r => setTimeout(r, 300));
+  }
+});
+</script>
+</body>
+</html>
