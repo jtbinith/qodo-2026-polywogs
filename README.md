@@ -1,53 +1,45 @@
-# Polywogs
+# qodo-hack-2026: the photo table
 
-What if the things kids build didn't just sit there?
+Everyone's photos on one table. Take only the ones you want. Nobody in the middle can see them.
 
-Polywogs is a glowing nature island where the models kids design in Tinkercad wake up as creatures called polywogs. But the island has a secret: it's a living computer, and the kids keep it running together.
+Friends put their phones, tablets and laptops together. The screens join into one shared table, everyone's photos spread across it like printed polaroids, and each person drags the ones they want onto their own device. It runs in any modern browser: no app, no account, no swapping phone numbers, and it works between iPhone, Android and Linux, Windows or Mac laptops.
 
-## Who it's for
+Built for the [Qodo "Build a Software Factory in 30 Days"](https://hackathon.qodo.ai) hackathon. Live at **https://jtbinith.github.io/qodo-hack-2026/**
 
-Primary-age kids at a weekly coding club, the volunteers who run it, and their families. The kids already design 3D models in Tinkercad and code micro:bits in MakeCode. Polywogs brings the two together in one world.
+## What works today
 
-## Why
+- **Join screens:** devices join a table with a code. Push the glowing orb towards a shared edge on two screens at the same moment and those edges join, so the table spans both screens.
+- **Share:** add photos or videos, and they appear on the table as prints that everyone at the table can see.
+- **Take:** drag a print onto your screen and the full original file comes to your device. Tap it to save (the share sheet on iPhone, a download on a laptop).
+- **Any network:** photos go directly between devices (WebRTC) when the network allows it. On hotel Wi-Fi or mobile data, where direct links are blocked, they go through the room server instead, end-to-end encrypted.
 
-A finished Tinkercad model is a strange kind of ending. A kid spends an hour on a cat, a rocket or a creature nobody has ever seen before, and then it just sits on the screen, or on a shelf once it's printed.
+Tested on an iPhone 12 (Safari, iOS 26) and a Linux laptop (Chrome) on hotel Wi-Fi.
 
-Polywogs turns that ending into a beginning. Your model comes alive with a job that suits its shape: a long, thin one races glowing fireflies along the island's threads, a big round one guards its memories. Your micro:bit is your polywog's brain. Code it however you like, and the island reacts.
+## How it works
 
-And nobody does it alone. Everyone's polywogs share one island. Push laptops together, or prop a parent's phone beside one, and the island stretches across all the screens, with fireflies hopping from one to the next. When the lily pads overflow and polywogs pile up in a wobbly heap, the whole club rushes to sort it out.
-
-Along the way, kids pick up how a real computer works:
-
-| On the island | In a computer |
+| File | What it does |
 |---|---|
-| The heart-tree | the processor |
-| Lily pads on the pond | memory |
-| Fireflies zipping along glowing threads | signals on wires |
+| `web/index.html` | The table: joining screens, prints, dragging, saving |
+| `web/net.js` | The room: who is here, a shared clock (synced to the earliest device) and screen joins, over Supabase Realtime |
+| `web/layout.js` | Where every screen sits in the shared table, from its edge joins |
+| `web/peers.js` | Links between devices: direct WebRTC first, the encrypted relay as a fallback; files stream in pieces |
+| `web/seal.js` | End-to-end encryption: ECDH P-256 key exchange, HKDF, AES-256-GCM |
+| `web/pick-test.html` | Test page: what a browser gives you when you pick photos (type, size, date, location, hashes) |
 
-## Kids' safety
+The room server (Supabase) only relays messages. It sees public keys and encrypted bytes, never a photo.
 
-Code names only, no kid accounts and no personal data. Families join from a phone with a room code. A volunteer can pause or remove anything.
+## Known gaps (honest list)
 
-## Status
+- The room server could swap public keys in transit (an active attack). Fix planned: both devices show a matching check built from the key fingerprints.
+- Anyone who knows a table code can join that table. Fix planned: the host confirms who is at the table.
+- On iPhone, videos save as a file, not into Photos.
+- The encrypted relay is slow (about 0.5 MB a second). A TURN relay would make blocked networks faster.
+- Test with your own photos only until the gaps above are fixed.
 
-Working now: the look guide and a test island. Coming next: polywogs, the heart-tree and the micro:bit.
+## History
 
-## How it's built
+This repo started as Polywogs (coding club kids' 3D models coming alive). I changed my mind about the project on 11 Nov 2026. The Polywogs commits and pull requests are kept in the history.
 
-Built for the Qodo "Build a Software Factory in 30 Days" hackathon. Every pull request is reviewed by Qodo, and over the month the project gains its own rules (AGENTS.md), a backlog in GitHub Issues and automated checks.
+## Credits
 
-## Run it
-
-Needs Node 24 (LTS) or 22.12+.
-
-```
-npm install
-npm run dev
-```
-
-- Look guide: http://127.0.0.1:5195/guide/
-- Test island: http://127.0.0.1:5195/island/
-
-## Licence
-
-MIT. Kids' models are never stored in this repo.
+[supabase-js](https://github.com/supabase/supabase-js), [exifr](https://github.com/MikeKovarik/exifr) and [hash-wasm](https://github.com/Daninet/hash-wasm), all MIT, in `web/vendor/`.
