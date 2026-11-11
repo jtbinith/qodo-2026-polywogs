@@ -25,7 +25,9 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     if (links[peer]) return links[peer];
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const L = links[peer] = { pc, dc: null, open: false, polite: myId < peer, makingOffer: false, ignoreOffer: false };
-    L.keyReady = new Promise((r) => (L.gotKey = r));
+    const keyWait = new Promise((r) => (L.gotKey = r));
+    // resolves when the key arrives or after a timeout, so one silent peer can't stall the relay queue
+    L.keyReady = Promise.race([keyWait, new Promise((r) => setTimeout(r, KEY_TIMEOUT))]);
     mine.then(({ pub }) => signal(peer, { pub: b64(pub) }));     // swap public keys
     const attach = (dc) => {
       L.dc = dc;
@@ -48,9 +50,14 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
   async function onSignal(from, data) {
     const L = link(from), pc = L.pc;
     if (data.pub) {
-      if (L.key) return;                    // first key wins; ignore later swaps
-      const { kp } = await mine;
-      L.key = await deriveKey(kp, unb64(data.pub), { table, a: myId, b: from });
+      if (L.key || L.keyFailed) return;     // first key wins; ignore later swaps
+      try {
+        const { kp } = await mine;
+        L.key = await deriveKey(kp, unb64(data.pub), { table, a: myId, b: from });
+      } catch (e) {
+        L.keyFailed = true;                 // malformed key: stop waiting on this peer
+        console.warn('bad key from', from, e);
+      }
       L.gotKey();
     } else if (data.r) {                    // relayed, encrypted frame
       await L.keyReady;
@@ -87,6 +94,7 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     const L = link(peer);
     relayTail = relayTail.then(async () => {
       await L.keyReady;
+      if (!L.key) return;                   // no usable key for this peer: drop instead of blocking the queue
       signal(peer, { r: b64(await seal(L.key, buf, myId, peer)) });
       await new Promise((r) => setTimeout(r, RELAY_GAP));
     });
