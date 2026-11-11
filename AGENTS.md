@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## What this is
-A browser app for sharing photos between any devices in the same room: phones, tablets and laptops. Devices join a room, push orbs to join their screens into one shared space and drag photos across. Files go device to device over WebRTC. When the network blocks that, they go through the room server (Supabase Realtime) end-to-end encrypted.
+A website for sharing photos between any devices in the same room: phones, tablets and laptops. Devices join a room, push orbs to join their screens into one shared space and drag photos across. Files go device to device over WebRTC. When the network blocks that, they go through the room server (Supabase Realtime) end-to-end encrypted.
 
 Every device in a room is a stranger: anyone with the room code can send anything. The code is written for that.
 
@@ -46,7 +46,7 @@ Builders follow these rules. Reviewers flag any change that breaks one, even if 
 - **Rule:** the room server never sees photos, keys or filenames in readable form. Anything relayed is sealed with `web/seal.js` first: a fresh random IV per message, sender and receiver bound in as associated data. Secrets come from `crypto.getRandomValues`, never `Math.random`.
 - **Allowed in the clear:** room codes, device ids and names, screen sizes, public keys and WebRTC setup messages. `Math.random` is fine for things that aren't secret, like where a print lands.
 - **Where:** `web/peers.js`, `web/seal.js` and anything that calls `signal()`.
-- **Why:** the point of the app is that nobody in the middle can look at your photos, including us.
+- **Why:** the point of the site is that nobody in the middle can look at your photos, including us.
 - **Breaks it:** `signal(peer, { file: bytes })` without `seal()` first.
 - **Checked by:** the relay run of `npm run test:browsers`; in review, anything sent through `signal()` that isn't sealed.
 
@@ -70,7 +70,7 @@ Builders follow these rules. Reviewers flag any change that breaks one, even if 
 **5. Joining and transfer changes pass the two-browser test before merging** (the Two-Browser Rule)
 - **Rule:** any change to joining, linking or transfer passes `npm run test:browsers` (direct and relay) before it is merged. This includes fixes written by review tools and agents.
 - **Where:** every pull request that touches `web/`.
-- **Why:** on Day 1 a review tool's fix looked right and broke the app twice: it crashed as soon as two devices connected and screens could never join. Only this test caught it.
+- **Why:** on Day 1 a review tool's fix looked right and broke the site twice: it crashed as soon as two devices connected and screens could never join. Only this test caught it.
 - **Checked by:** the test output in the PR description. If a run couldn't happen (for example no internet for the relay run), the PR says so. It never claims a pass it didn't see.
 
 ## Known gaps
