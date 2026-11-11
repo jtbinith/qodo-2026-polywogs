@@ -1,7 +1,7 @@
 // The two-browser test: two browser windows play two devices. They join a room, join
 // screens, one shares photos and a video, drags them onto the other screen, and the other
 // must end up with byte-identical files. Also checks a stranger's malformed messages are
-// ignored and that a late guest still sees photos after their owner leaves.
+// ignored and that a late guest can still download photos after their owner leaves.
 //
 //   node tests/two-browser.mjs           direct device-to-device path (WebRTC)
 //   node tests/two-browser.mjs --relay   force the end-to-end encrypted relay path
@@ -96,8 +96,7 @@ try {
   // a late guest still gets photos B holds after A (the owner) leaves
   await A.context().close();
   const C = await device(390, 700);
-  await until(C, () => window.__t && window.__t.prints.size >= 2, null, 45000);
-  check(true, 'late guest sees the photos still held after the owner left');
+  await until(C, () => window.__t && window.__t.prints.size >= 2, null, 45000);   // C has been told about the photos B still holds
   await until(B, () => Object.keys(window.__t.net.peers).length === 2, null, 45000);   // A has left B's view of the room
   await Promise.all([B.evaluate(() => window.__t.net.push('R', 300)), C.evaluate(() => window.__t.net.push('L', 300))]);
   await until(C, () => window.__t.net.joins.length === 1, null, 30000);
