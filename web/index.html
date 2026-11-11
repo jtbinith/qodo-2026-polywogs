@@ -160,8 +160,8 @@ function onMessage(from, m, bytes) {
     prints.set(m.pid, { ...meta, img: null, thumb: null });
     if (thumbSize) expect('thumb:' + m.pid, from, thumbSize);
   } else if (m.t === 'move') {
-    if (!validMove(m)) return;
-    const p = prints.get(m.pid); if (p && drag?.p !== p) { p.anchor = m.anchor; p.x = m.x; p.y = m.y; }
+    // glide towards where the other device put it instead of jumping (smoother on a laggy relay)
+    const p = prints.get(m.pid); if (p && drag?.p !== p) { p.anchor = m.anchor; p.tx = m.x; p.ty = m.y; }
   } else if (m.t === 'want') {           // someone wants the full photo
     const file = validPidMsg(m) && files.get(m.pid);
     if (file) peers.sendFile(from, m.pid, file);
@@ -192,18 +192,16 @@ async function done(fid, parts) {
     return;
   }
   const p = prints.get(fid); if (!p) return;
-  // the bytes must match the fingerprint announced with the print, or it isn't the photo
-  if (await sha256Hex(parts) !== p.sha) {
-    const from = p.holders.find((k) => k !== id && net.peers[k] && k !== p.lastSource);
-    p.holders = p.holders.filter((k) => k !== p.lastSource);   // stop trusting that source
-    toast(from ? 'That copy was damaged. Trying another' : 'That copy was damaged. Drag it again to retry');
-    if (from) { p.lastSource = from; expect(p.pid, from, p.size); peers.send(from, { t: 'want', pid: p.pid }); }
-    return;
-  }
+  // show the photo straight away; checking a big file's fingerprint can take a few seconds on a phone
   const file = new File(parts, p.name, { type: p.type, lastModified: Date.now() });
   files.set(fid, file);
   if (!p.holders.includes(id)) p.holders.push(id);
   broadcast((peer) => peers.send(peer, { t: 'have', pid: fid }));
+  sha256Hex(parts).then((h) => {
+    if (h === p.sha) return;
+    files.delete(fid);
+    toast('That copy was damaged. Drag it again to retry');
+  });
   toast(`Got ${p.name}. Tap it to save`);
 }
 
@@ -353,6 +351,7 @@ function frame() {
   for (const k of Object.keys(sizes)) if (k !== id && layout.group[k] === gid) ctx.strokeRect(layout.pos[k][0] + 1, layout.pos[k][1] + 1, sizes[k].w - 2, sizes[k].h - 2);
   ctx.setLineDash([]);
   for (const p of prints.values()) {
+    if (p.tx !== undefined) { p.x += (p.tx - p.x) * 0.35; p.y += (p.ty - p.y) * 0.35; }
     if (!visible(p)) continue;
     const [px, py] = world(p);
     ctx.save();
