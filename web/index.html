@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>qodo-hack-2026 · photo table</title>
+<title>qodo-hack-2026 · universal sharing</title>
 <style>
   html, body { margin: 0; height: 100%; background: #2b1d14; color: #f5ead8; overflow: hidden;
     font-family: system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; overscroll-behavior: none; }
@@ -28,10 +28,10 @@
 <div id="toast"></div>
 <div id="bar"><label>＋ Photos<input id="pick" type="file" accept="image/*,video/*" multiple></label></div>
 <div id="lobby"><form id="f">
-  <div>Table code</div>
+  <div>Room code</div>
   <input id="code" maxlength="12" autocomplete="off" required>
   <button>Join</button>
-  <button type="button" id="new">New table</button>
+  <button type="button" id="new">New room</button>
   <small>Same code on every device. Test only: anyone with the code can see the photos.</small>
 </form></div>
 <script src="vendor/supabase.js"></script>
@@ -49,7 +49,7 @@ const name = NAMES[rnd[0] % NAMES.length];
 const params = new URLSearchParams(location.search);
 $('code').value = (params.get('room') || '').toUpperCase();
 
-// A table code people can't guess: 10 characters from a 32-letter alphabet (50 bits).
+// A room code people can't guess: 10 characters from a 32-letter alphabet (50 bits).
 function newCode() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', b = new Uint8Array(10);
   crypto.getRandomValues(b);
