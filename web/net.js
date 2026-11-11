@@ -73,14 +73,31 @@ export function joinRoom({ room, id, name, size, onSignal }) {
   // --- orb pushes and joins (decided by the time keeper) ---
   // The time keeper collects a burst of pushes and solves them together once nobody
   // has pushed for a moment.
-  let pushes = [], burstTimer = null;
+  // Pushes come from the network, so they're checked and capped: a device must be in the
+  // room, the push must fit its screen and be recent, each device keeps at most 2 pending
+  // pushes, a batch holds at most 8 (the pairing search grows fast), and a batch is solved
+  // no later than 2.5 s after it starts even if pushes keep arriving.
+  const EDGES = { L: 1, R: 1, T: 1, B: 1 }, MAX_BATCH = 8, PER_DEV = 2, DEADLINE = 2500;
+  let pushes = [], burstTimer = null, burstStart = 0;
+  function validPush(p) {
+    const peer = p && s.peers[p.dev];
+    if (!peer || !EDGES[p.edge] || !Number.isFinite(p.along) || !Number.isFinite(p.t)) return false;
+    const len = p.edge === 'L' || p.edge === 'R' ? peer.h : peer.w;
+    return p.along >= 0 && p.along <= len && Math.abs(p.t - s.now()) < 10000;
+  }
   function onPush(p) {
-    if (s.leader !== id) return;
-    pushes.push(p);
+    if (s.leader !== id || !validPush(p)) return;
+    const mine = pushes.filter((q) => q.dev === p.dev);
+    if (mine.length >= PER_DEV) pushes.splice(pushes.indexOf(mine[0]), 1); // keep the newest
+    if (pushes.length >= MAX_BATCH) return;
+    pushes.push({ dev: p.dev, edge: p.edge, along: p.along, t: p.t });
+    if (!burstStart) burstStart = performance.now();
     clearTimeout(burstTimer);
-    burstTimer = setTimeout(resolve, 900);
+    const wait = Math.min(900, Math.max(0, DEADLINE - (performance.now() - burstStart)));
+    burstTimer = setTimeout(resolve, wait);
   }
   function resolve() {
+    burstStart = 0;
     const batch = pushes; pushes = [];
     const sizes = Object.fromEntries(Object.entries(s.peers).map(([k, p]) => [k, { w: p.w, h: p.h }]));
     const { joins, retry, unmatched } = matchPushes(batch, WINDOW, { sizes, joins: s.joins });
@@ -96,7 +113,7 @@ export function joinRoom({ room, id, name, size, onSignal }) {
       if (p.t > cutoff) pushes.push(p);
       else { send('nomatch', { dev: p.dev }); emit('nomatch', { dev: p.dev }); }
     }
-    if (pushes.length) burstTimer = setTimeout(resolve, 400);
+    if (pushes.length) { burstStart = performance.now(); burstTimer = setTimeout(resolve, 400); }
   }
   function sendLayout() {
     if (s.leader !== id) return;

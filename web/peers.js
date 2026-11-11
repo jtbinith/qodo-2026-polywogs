@@ -25,7 +25,7 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
   function link(peer) {
     if (links[peer]) return links[peer];
     const pc = new RTCPeerConnection({ iceServers: ICE });
-    const L = links[peer] = { pc, dc: null, open: false, polite: myId < peer, makingOffer: false, ignoreOffer: false };
+    const L = links[peer] = { pc, dc: null, open: false, polite: myId < peer, makingOffer: false, ignoreOffer: false, pending: [] };
     const keyWait = new Promise((r) => (L.gotKey = r));
     // resolves when the key arrives or after a timeout, so one silent peer can't stall the relay queue
     L.keyReady = Promise.race([keyWait, new Promise((r) => setTimeout(r, KEY_TIMEOUT))]);
@@ -51,6 +51,9 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
   async function onSignal(from, data) {
     const L = link(from), pc = L.pc;
     if (data.pub) {
+      // Answer a first-time key with ours, in case our earlier one was sent before they
+      // were listening (a device that just joined can miss it). Replies aren't answered.
+      if (!data.reply) mine.then(({ pub }) => signal(from, { pub: b64(pub), reply: true }));
       if (L.key || L.keyFailed) return;     // first key wins; ignore later swaps
       try {
         const { kp } = await mine;
@@ -70,16 +73,26 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
       L.ignoreOffer = !L.polite && collision;
       if (L.ignoreOffer) return;
       await pc.setRemoteDescription(data.desc);
+      // candidates that arrived before this description can be applied now
+      for (const c of L.pending.splice(0)) { try { await pc.addIceCandidate(c); } catch (e) { console.warn(e); } }
       if (data.desc.type === 'offer') { await pc.setLocalDescription(); signal(from, { desc: pc.localDescription.toJSON() }); }
     } else if (data.cand) {
+      // too early (no remote description yet): keep it for later instead of losing it
+      if (!pc.remoteDescription) { if (L.pending.length < 50) L.pending.push(data.cand); return; }
       try { await pc.addIceCandidate(data.cand); } catch (e) { if (!L.ignoreOffer) console.warn(e); }
     }
   }
 
   function onFrame(from, u8) {
-    const n = new DataView(u8.buffer, u8.byteOffset).getUint32(0);
-    const head = JSON.parse(new TextDecoder().decode(u8.subarray(4, 4 + n)));
-    emit(from, head, u8.subarray(4 + n));
+    let head;
+    try {
+      if (u8.length < 4) return;
+      const n = new DataView(u8.buffer, u8.byteOffset).getUint32(0);
+      if (n > 4096 || 4 + n > u8.length) return;          // header must fit and stay small
+      head = JSON.parse(new TextDecoder().decode(u8.subarray(4, 4 + n)));
+      if (!head || typeof head !== 'object') return;
+      emit(from, head, u8.subarray(4 + n));
+    } catch (e) { console.warn('bad frame from', from, e); }
   }
   function frame(head, bytes = new Uint8Array(0)) {
     const h = new TextEncoder().encode(JSON.stringify(head));
