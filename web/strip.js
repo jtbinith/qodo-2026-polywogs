@@ -109,8 +109,7 @@ export function stripJpeg(b) {
 export async function prepareFile(file, keep) {
   if (keep) return { file };
   const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
-  if (isHeic(head) || /^image\/hei[cf]/i.test(file.type)) return { file, warn: 'details not removed' };
-  if (!isJpeg(head)) return { file };
+  if (!isJpeg(head)) return isHeic(head) || /^image\/hei[cf]/i.test(file.type) ? { file, warn: 'details not removed' } : { file };
   const clean = stripJpeg(new Uint8Array(await file.arrayBuffer()));
   if (!clean) return { file, warn: 'details not removed' };
   return { file: new File([clean], file.name, { type: file.type || 'image/jpeg', lastModified: file.lastModified }) };
