@@ -57,6 +57,16 @@ test('JFIF and Adobe segments keep only their fixed fields', () => {
   assert.deepEqual(out, concat(plainJpeg.subarray(0, 20), adobe, plainJpeg.subarray(20)), 'JFIF without its thumbnail, Adobe with its 12 bytes');
 });
 
+test('a TEM marker (FF 01, no length) is kept and the photo still cleaned', async () => {
+  const tem = Uint8Array.of(0xff, 0x01);
+  const withTem = concat(plainJpeg.subarray(0, 2), tem, exifApp1(), plainJpeg.subarray(2));
+  const out = stripJpeg(withTem);
+  assert.ok(out, 'stripped, not given up on');
+  assert.equal(await exifr.gps(out), undefined, 'no GPS');
+  assert.equal(await exifr.orientation(out), 6, 'orientation kept');
+  assert.ok(has(out, tem), 'TEM kept');
+});
+
 test('edge: a JPEG without metadata is unchanged', () => {
   assert.deepEqual(stripJpeg(plainJpeg), plainJpeg);
   assert.deepEqual(stripJpeg(progressiveJpeg), progressiveJpeg);
