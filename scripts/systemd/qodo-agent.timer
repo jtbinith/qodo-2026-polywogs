@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the backlog for ready-for-agent tickets every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+Unit=qodo-agent.service
+
+[Install]
+WantedBy=timers.target

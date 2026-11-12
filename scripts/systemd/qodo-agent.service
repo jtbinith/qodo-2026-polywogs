@@ -1,0 +1,12 @@
+[Unit]
+Description=Qodo factory: one step of the ticket loop (scripts/agent-watch.mjs)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/qodo-hack-2026
+# node and claude live under the home directory, not in systemd's default PATH
+Environment=PATH=%h/.nvm/versions/node/v25.2.1/bin:%h/.toolbox/bin:/usr/local/bin:/usr/bin:/bin
+# run the merged copy from origin/main, not whatever branch the working checkout is on
+ExecStartPre=/usr/bin/git -C %h/qodo-hack-2026 fetch -q origin main
+ExecStartPre=/bin/sh -c 'mkdir -p %h/.local/state/qodo-agent && git -C %h/qodo-hack-2026 show origin/main:scripts/agent-watch.mjs > %h/.local/state/qodo-agent/agent-watch.mjs'
+ExecStart=%h/.nvm/versions/node/v25.2.1/bin/node %h/.local/state/qodo-agent/agent-watch.mjs
