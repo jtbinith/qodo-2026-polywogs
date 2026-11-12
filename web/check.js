@@ -62,8 +62,43 @@ export function validMissing(list) {
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const isRoomCode = (c) => typeof c === 'string' && /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{10}$/.test(c);
 
-// A received thumbnail is decoded only if this accepts it (S14). Stub: not written yet.
-export const thumbFits = (b) => true;
+// A received thumbnail is decoded only if this accepts it (S14): a JPEG, read to its end
+// without decoding, with exactly one frame header of a kind we send (baseline, extended or
+// progressive) giving a size of at most LIMITS.thumbSide on each side. Anything else (another
+// format, a size given later, a second frame, bytes that can't be read) is never decoded,
+// so a tiny file claiming enormous dimensions can't use gigabytes while it decodes.
+const SOF_OK = [0xc0, 0xc1, 0xc2];
+const isSof = (m) => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
+export function thumbFits(b) {
+  if (!(b instanceof Uint8Array) || b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return false;
+  let i = 2, frames = 0, w = 0, h = 0;
+  for (;;) {
+    if (i + 2 > b.length || b[i] !== 0xff) return false;
+    const m = b[i + 1];
+    if (m === 0xff) { i++; continue; }                                 // fill byte
+    if (m === 0xd9) break;                                             // end of image
+    if (m === 0xd8 || m === 0x00 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) return false;
+    if (i + 4 > b.length) return false;
+    const end = i + 2 + ((b[i + 2] << 8) | b[i + 3]);
+    if (end < i + 4 || end > b.length) return false;
+    if (m === 0xde || m === 0xdf || (isSof(m) && !SOF_OK.includes(m))) return false;   // hierarchical, lossless, arithmetic
+    if (isSof(m)) {
+      if (++frames > 1 || end < i + 10) return false;
+      h = (b[i + 5] << 8) | b[i + 6]; w = (b[i + 7] << 8) | b[i + 8];
+    }
+    i = end;
+    if (m === 0xda) {                                                  // scan data runs to the next real marker
+      for (;;) {
+        i = b.indexOf(0xff, i);
+        if (i < 0 || i + 1 >= b.length) return false;
+        const n = b[i + 1];
+        if (n !== 0x00 && !(n >= 0xd0 && n <= 0xd7)) break;
+        i += 2;
+      }
+    }
+  }
+  return frames === 1 && w >= 1 && h >= 1 && w <= LIMITS.thumbSide && h <= LIMITS.thumbSide;
+}
 
 // File ids on the wire: a print id, or "thumb:" + a print id for its thumbnail.
 export const isFid = (v) => isPid(v) || (typeof v === 'string' && v.startsWith('thumb:') && isPid(v.slice(6)));

@@ -87,7 +87,7 @@ Every message from another device is checked in `web/check.js` (or `net.js` for 
 | `want` | a request for a file | Any device. Planned: only devices it was shared with (S10) | `validPidMsg` |
 | `have` | "I now hold this file" | Any device | `validPidMsg` |
 | `need` | a request for missing pieces | Any device | `validNeed` |
-| `chunk` | one piece of a file | Only the device the file was requested from | `validChunk`: expected transfer, size, index and exact length |
+| `chunk` | one piece of a file | Only the device the file was requested from | `validChunk`: expected transfer, size, index and exact length. A finished thumbnail is decoded only if `thumbFits` accepts it: one JPEG frame of at most 400 × 400 (S14) |
 | `dropcheck` | "check whether this print landed on you" | Any device | `validPidMsg` |
 
 ## 6. Keys

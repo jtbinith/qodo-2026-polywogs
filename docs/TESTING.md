@@ -58,7 +58,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | S9 | Integration, Acceptance | A blocked device's prints disappear. A stranger's thumbnail is blurred (to write) |
 | S11 | Integration | A room's code stops working 30 minutes after the last device leaves (to write) |
 | S13 | System | After Leave, no received file or thumbnail is left in memory (to write) |
-| S14 | Unit | A thumbnail over 400 × 400 pixels is not decoded (to write) |
+| S14 | Unit, System | `tests/thumb.test.mjs`: a thumbnail over 400 × 400 pixels, or whose size can't be read, is not decoded. The two-browser test sends 400 × 400, 401 × 400 and a 30000 × 30000 image bomb: only the first is decoded, the others show a plain card (exists) |
 | S15 | Acceptance | The site loaded inside another site's frame refuses to run (manual) |
 | S16 | System | The room code is gone from the address bar after joining (to write) |
 | S8 | Integration | A client without a token from the site cannot join a room's channel (to write) |
