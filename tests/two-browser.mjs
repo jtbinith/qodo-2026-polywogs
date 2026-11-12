@@ -150,6 +150,16 @@ try {
   const toldSender = await A.waitForFunction(() => document.getElementById('toast').textContent.includes('Couldn’t send'), null, { timeout: 20000 }).then(() => true, () => false);
   const waited = (Date.now() - asked) / 1000;
   check(toldSender && waited >= 10 && waited < 20, `send to a silent device gave up and told the sender (after ${waited.toFixed(1)} s)`);
+  // a send that fails for another reason (here the file can't be read) doesn't blame the device
+  const why = await A.evaluate(async (ghost) => {
+    const t = window.__t, p = [...t.prints.values()].find((p) => p.name === 'photo-1.jpg'), real = t.files.get(p.pid);
+    t.files.set(p.pid, { size: real.size, slice: () => ({ arrayBuffer: () => Promise.reject(new DOMException('file changed', 'NotReadableError')) }) });
+    t.onMessage(ghost, { t: 'want', pid: p.pid });
+    await new Promise((r) => setTimeout(r, 500));
+    t.files.set(p.pid, real);
+    return document.getElementById('toast').textContent;
+  }, GHOST);
+  check(why.includes('Couldn’t send photo-1.jpg') && !why.includes('stopped answering'), `a read error isn't blamed on the other device ("${why}")`);
 
   // a stranger's malformed messages change nothing, even when aimed at a real transfer
   const ids = await A.evaluate(() => { const t = window.__t; return { a: t.id, b: Object.keys(t.net.peers).find((k) => k !== t.id) }; });
