@@ -26,3 +26,13 @@ test('a thumbnail whose size can\'t be read is not decoded', () => {
   assert.equal(thumbFits(new Uint8Array(0)), false, 'empty');
   assert.equal(thumbFits(null), false, 'nothing');
 });
+test('a thumbnail with bytes after its end marker is not decoded', () => {
+  // Ultra HDR keeps a second image (the gain map) after the first end marker, so a small
+  // first image could carry a huge one behind it. Our own thumbnails end at the marker.
+  const small = sizedJpeg(400, 400), after = (x) => { const o = new Uint8Array(small.length + x.length); o.set(small); o.set(x, small.length); return o; };
+  assert.equal(small[small.length - 2], 0xff, 'fixture ends with its end marker');
+  assert.equal(small[small.length - 1], 0xd9, 'fixture ends with its end marker');
+  assert.equal(thumbFits(after(new Uint8Array(30000))), false, '400 x 400 followed by 30000 zero bytes');
+  assert.equal(thumbFits(after(sizedJpeg(30000, 30000))), false, '400 x 400 followed by a 30000 x 30000 second image');
+  assert.equal(thumbFits(after(new Uint8Array(1))), false, 'one stray byte');
+});
