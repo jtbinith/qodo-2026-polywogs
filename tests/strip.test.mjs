@@ -1,7 +1,7 @@
 // Unit tests for web/strip.js (S6): location and device details are removed from JPEG photos.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripJpeg, prepareFile, isJpeg, isHeic } from '../web/strip.js';
+import { stripJpeg, prepareFile, isJpeg } from '../web/strip.js';
 import { plainJpeg, progressiveJpeg, iphoneJpeg, androidJpeg, iphoneImage, iccApp2, heicFile, exifApp1, concat, segment, exifr } from './jpeg-fixtures.mjs';
 
 const everything = { tiff: true, exif: true, gps: true, xmp: true, iptc: true, icc: false, makerNote: true };
@@ -79,7 +79,6 @@ test('a broken JPEG is not guessed at', () => {
 
 test('file types are recognised from their contents', () => {
   assert.ok(isJpeg(iphoneJpeg()) && !isJpeg(heicFile()));
-  assert.ok(isHeic(heicFile()) && !isHeic(plainJpeg));
 });
 
 test('prepareFile sends a cleaned copy with the same name and type', async () => {

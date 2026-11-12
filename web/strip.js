@@ -7,12 +7,11 @@
 // dates, maker notes, thumbnail), XMP, IPTC (APP13), comments, MPF and every other APPn
 // segment, and anything after the main image ends, such as an iPhone's HDR gain map.
 // The fingerprint is taken of the cleaned file.
-// Other formats (HEIC, PNG, WebP, video) are sent unchanged with a warning for now (S17).
+// Anything that isn't a JPEG (HEIC, PNG, WebP, video and the rest) is sent unchanged with a
+// warning for now (S17).
 
 export const isJpeg = (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
-const HEIF_BRANDS = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'];
 const ascii = (b, from, to) => String.fromCharCode(...b.subarray(from, to));
-export const isHeic = (b) => b.length >= 12 && ascii(b, 4, 8) === 'ftyp' && HEIF_BRANDS.includes(ascii(b, 8, 12));
 const startsWith = (seg, text) => seg.length >= 4 + text.length && ascii(seg, 4, 4 + text.length) === text;
 
 // The Orientation tag (1–8) from an EXIF segment, or 0 if it has none or can't be read.
@@ -108,8 +107,8 @@ export function stripJpeg(b) {
 // warn is set when the file still carries whatever details it had.
 export async function prepareFile(file, keep) {
   if (keep) return { file };
-  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
-  if (!isJpeg(head)) return isHeic(head) || /^image\/hei[cf]/i.test(file.type) ? { file, warn: 'details not removed' } : { file };
+  const head = new Uint8Array(await file.slice(0, 3).arrayBuffer());
+  if (!isJpeg(head)) return { file, warn: 'details not removed' };   // HEIC, PNG, WebP, video: not cleaned yet (S17)
   const clean = stripJpeg(new Uint8Array(await file.arrayBuffer()));
   if (!clean) return { file, warn: 'details not removed' };
   return { file: new File([clean], file.name, { type: file.type || 'image/jpeg', lastModified: file.lastModified }) };
