@@ -80,9 +80,24 @@ try {
     .map(async (p) => [p.name, [...new Uint8Array(await window.__t.files.get(p.pid).arrayBuffer())]])), batch);
   for (const [name, bytes] of held) check(await exifr.gps(Buffer.from(bytes)) === undefined, `${name} cleaned though "Keep details" was ticked mid-batch`);
 
-  await until(B, () => window.__t.prints.size === 8);
-  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 6);
-  check(true, 'the other device sees 8 prints with 6 thumbnails');
+  // the mirror: ticked when picked, unticked mid-batch. The batch keeps its details, as chosen at pick time
+  const kbatch = ['IMG_0006.JPG', 'IMG_0007.JPG'];
+  await A.check('#keep');
+  await A.evaluate(([bytes, names]) => {
+    const pick = document.getElementById('pick'), dt = new DataTransfer();
+    for (const n of names) dt.items.add(new File([new Uint8Array(bytes)], n, { type: 'image/jpeg' }));
+    pick.files = dt.files;
+    pick.dispatchEvent(new Event('change'));
+    document.getElementById('keep').checked = false;   // unticked for the next pick, while this one is still running
+  }, [[...iphoneJpeg()], kbatch]);
+  await until(A, (names) => names.every((n) => [...window.__t.prints.values()].some((p) => p.name === n)), kbatch);
+  const kheld = await A.evaluate((names) => Promise.all([...window.__t.prints.values()].filter((p) => names.includes(p.name))
+    .map(async (p) => [p.name, [...new Uint8Array(await window.__t.files.get(p.pid).arrayBuffer())]])), kbatch);
+  for (const [name, bytes] of kheld) check(await exifr.gps(Buffer.from(bytes)) !== undefined, `${name} kept its details though "Keep details" was unticked mid-batch`);
+
+  await until(B, () => window.__t.prints.size === 10);
+  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 8);
+  check(true, 'the other device sees 10 prints with 8 thumbnails');
 
   // drag photo-0 and the video onto B's screen with the mouse: press on the print, move past
   // A's right edge (B's screen is joined there) and let go
