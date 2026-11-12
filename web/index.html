@@ -40,7 +40,7 @@
 <script type="module">
 import { joinRoom } from './net.js';
 import { solveLayout } from './layout.js';
-import { createPeers } from './peers.js';
+import { createPeers, SendTimeout } from './peers.js';
 import { prepareFile } from './strip.js';
 import { LIMITS, validPrint, validMove, validChunk, validPidMsg, validNeed, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
 
@@ -147,10 +147,11 @@ const broadcast = (f) => others().forEach(f);
 const announced = new Map(); // pid -> devices we've announced it to
 const sentTo = (pid) => announced.get(pid) || announced.set(pid, new Set()).get(pid);
 function announce(peer, p) {
-  sentTo(p.pid).add(peer);
+  sentTo(p.pid).add(peer);   // counted while it's on the way, so it isn't announced twice
   const { img, thumb, lastSource, ...meta } = p;
-  peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 });
-  if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb]));
+  // dropped (the device stopped answering): forget it, so the catch-up announces it again
+  peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 }).then((sent) => { if (!sent) sentTo(p.pid).delete(peer); });
+  if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb])).catch(() => {});   // the receiver asks again
 }
 
 // ---------- messages between devices ----------
@@ -171,7 +172,7 @@ function onMessage(from, m, bytes) {
     const p = prints.get(m.pid); if (p && drag?.p !== p) { p.anchor = m.anchor; p.x = m.x; p.y = m.y; }
   } else if (m.t === 'want') {           // someone wants the full photo
     const file = validPidMsg(m) && files.get(m.pid);
-    if (file) peers.sendFile(from, m.pid, file);
+    if (file) peers.sendFile(from, m.pid, file).catch((e) => gaveUp(from, m.pid, e));
   } else if (m.t === 'have') {           // someone now holds the bytes
     const p = validPidMsg(m) && prints.get(m.pid);
     if (p && !p.holders.includes(from) && p.holders.length < 50) p.holders.push(from);
@@ -181,7 +182,7 @@ function onMessage(from, m, bytes) {
     const thumb = prints.get(pid)?.thumb;
     const src = m.fid.startsWith('thumb:') ? (thumb && new Blob([thumb])) : files.get(pid);
     const cs = LIMITS.chunkSizes.includes(m.cs) ? m.cs : null;
-    if (src) peers.sendFile(from, m.fid, src, m.missing, m.missing ? cs : null);
+    if (src) peers.sendFile(from, m.fid, src, m.missing, m.missing ? cs : null).catch((e) => m.fid === pid && gaveUp(from, pid, e));
   } else if (m.t === 'chunk') {
     const inc = incoming.get(m.fid);
     if (!inc || inc.from !== from || !validChunk(m, bytes, inc)) return;
@@ -191,6 +192,12 @@ function onMessage(from, m, bytes) {
     if (inc.got === inc.n) { incoming.delete(m.fid); done(m.fid, inc.parts); }
   }
   // any other message type has no check, so it is dropped
+}
+// A send was cancelled (S1.3). They can ask again. Only a timeout is the other device's fault.
+function gaveUp(to, pid, e) {
+  const timedOut = e instanceof SendTimeout;
+  if (!timedOut) console.warn('send failed', to, pid, e);
+  toast(`Couldn’t send ${prints.get(pid)?.name || 'a photo'} to ${net.peers[to]?.name || 'a device'}` + (timedOut ? ': it stopped answering' : ''));
 }
 async function done(fid, parts) {
   if (fid.startsWith('thumb:')) {
@@ -316,21 +323,26 @@ function start(room) {
     onMessage(from, m, bytes);
   });
   const known = new Set();
-  net.on((ev) => {
-    if (ev !== 'peers') return;
-    for (const k of others()) if (!known.has(k)) { known.add(k); peers.connect(k); } // swap keys, try a direct link
-    // Catch everyone up. The owner announces its prints; once the owner has left, anyone
-    // still holding a print announces it. Re-checked on every change in who's here, because
-    // a device that closes can take a while to drop out of the room.
+  // Catch everyone up. The owner announces its prints; once the owner has left, anyone
+  // still holding a print announces it. Re-checked on every change in who's here, because
+  // a device that closes can take a while to drop out of the room, and whenever a device's
+  // key arrives, because a print to it may have been dropped while we waited (S1.3).
+  const catchUp = () => {
     for (const p of prints.values()) {
       if (!(p.owner === id || (!net.peers[p.owner] && files.has(p.pid)))) continue;
       for (const k of others()) if (!sentTo(p.pid).has(k)) announce(k, p);
     }
+  };
+  peers.onReady(catchUp);
+  net.on((ev) => {
+    if (ev !== 'peers') return;
+    for (const k of others()) if (!known.has(k)) { known.add(k); peers.connect(k); } // swap keys, try a direct link
+    catchUp();
   });
   net.on((ev) => {
     if (ev === 'joined') toast('Screens joined ✨');
   });
-  window.__t = { net, peers, prints, files, incoming, expect, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
+  window.__t = { net, peers, prints, files, incoming, expect, onMessage, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
 }
 // Only codes made by New room are accepted: a hand-typed code like TEST is easy to guess.
 function tryStart(code) {

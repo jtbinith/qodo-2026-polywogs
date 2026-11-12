@@ -15,10 +15,29 @@ const RELAY_CHUNK = 24 * 1024;   // keeps each relay message well under the serv
 const RELAY_GAP = 45;            // ms between relay messages (stays under the server's rate limit)
 const HOLD = 400;                // relay frames held per peer while its key is on the way (each ≤ 24 KB)
 const HIGH_WATER = 1 << 20;
+const SEND_TIMEOUT = 10000;      // ms a send waits on one device with no progress before giving up (S1.3)
+const DRAIN_CHECK = 1000;        // ms between checks that a full direct buffer is still draining
+
+// A send gave up because the other device stopped answering.
+export class SendTimeout extends Error {
+  constructor(peer) { super(`no progress from ${peer} for ${SEND_TIMEOUT / 1000} s`); this.name = 'SendTimeout'; this.peer = peer; }
+}
+
+// Wait on one device, giving up after SEND_TIMEOUT with no progress. `start(ok, progress)`
+// begins the wait: it calls ok(value) when done and progress() to restart the timer, and
+// returns a function that cancels the wait.
+function waitOn(peer, start) {
+  return new Promise((resolve, reject) => {
+    let timer, cancel = () => {};
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => { cancel(); reject(new SendTimeout(peer)); }, SEND_TIMEOUT); };
+    arm();
+    cancel = start((v) => { clearTimeout(timer); cancel(); resolve(v); }, arm) || cancel;
+  });
+}
 
 export function createPeers({ myId, table, signal, forceRelay = false }) {
   const links = {};   // peer id -> { pc, dc, open, polite, makingOffer, ignoreOffer, pending, key, keyFailed, outbox, inbox }
-  const handlers = new Set();
+  const handlers = new Set(), readyHandlers = new Set();
   const emit = (from, msg, bytes) => handlers.forEach((f) => f(from, msg, bytes));
   const mine = makeKeyPair();
 
@@ -109,40 +128,65 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
   // A peer's key has arrived (or turned out bad): deliver what was waiting for it.
   async function keyArrived(peer, L) {
     const out = L.outbox.splice(0), inb = L.inbox.splice(0);
-    if (!L.key) { out.forEach((o) => o.done()); return; } // bad key: drop, but don't leave senders hanging
-    for (const o of out) enqueue(peer, L, o.buf).then(o.done);
+    if (!L.key) { out.forEach((o) => o.done(false)); return; } // bad key: drop, but don't leave senders hanging
+    for (const o of out) o.done(enqueue(peer, L, o.buf));  // stops its timer: the shared queue isn't a wait on the device
+    readyHandlers.forEach((f) => f(peer));                 // anything dropped while waiting can be sent again
     for (const r of inb) await openRelayed(peer, L, r);
   }
 
   // One relay queue for the whole page, paced so we don't trip the server's rate limit.
-  // Only frames whose key is ready go in it.
+  // Only frames whose key is ready go in it. Resolves true once the frame is sent. A frame
+  // that fails (seal or signal throws) rejects only its own send: the queue carries on.
   let relayTail = Promise.resolve();
   function enqueue(peer, L, buf) {
-    relayTail = relayTail.then(async () => {
+    const sent = relayTail.then(async () => {
       signal(peer, { r: b64(await seal(L.key, buf, myId, peer)) });
       await new Promise((r) => setTimeout(r, RELAY_GAP));
     });
-    return relayTail;
+    relayTail = sent.catch(() => {});
+    return sent.then(() => true);
   }
+  // Resolves true if the frame was sent, false if it was dropped.
   function relay(peer, buf) {
     const L = link(peer);
-    if (L.keyFailed) return Promise.resolve();
+    if (L.keyFailed) return Promise.resolve(false);
     if (L.key) return enqueue(peer, L, buf);
-    return new Promise((done) => { if (L.outbox.length < HOLD) L.outbox.push({ buf, done }); else done(); });
+    if (L.outbox.length >= HOLD) return Promise.resolve(false);
+    return waitOn(peer, (done) => {
+      const o = { buf, done };
+      L.outbox.push(o);
+      return () => { const i = L.outbox.indexOf(o); if (i >= 0) L.outbox.splice(i, 1); };   // timed out: never sent
+    });
   }
 
   async function sendFrame(peer, buf) {
     const L = link(peer);
     if (L.open && L.dc.readyState === 'open') {
-      if (L.dc.bufferedAmount > HIGH_WATER) await new Promise((r) => L.dc.addEventListener('bufferedamountlow', r, { once: true }));
+      if (L.dc.bufferedAmount > HIGH_WATER) await drained(peer, L.dc);
       L.dc.send(buf);
-    } else await relay(peer, buf);
+      return true;
+    }
+    return relay(peer, buf);
   }
 
-  const send = (peer, msg) => sendFrame(peer, frame(msg));
+  // Wait for a full direct buffer to drain. A slow link that keeps draining restarts the timer.
+  function drained(peer, dc) {
+    return waitOn(peer, (done, progress) => {
+      let last = dc.bufferedAmount;
+      const check = setInterval(() => { if (dc.bufferedAmount < last) progress(); last = dc.bufferedAmount; }, DRAIN_CHECK);
+      const low = () => done();
+      dc.addEventListener('bufferedamountlow', low, { once: true });
+      return () => { clearInterval(check); dc.removeEventListener('bufferedamountlow', low); };
+    });
+  }
+
+  // A short message that can't be sent in time is dropped. Resolves true if it was sent and
+  // false if it was dropped, so the caller can send it again (see onReady).
+  const send = (peer, msg) => sendFrame(peer, frame(msg)).catch((e) => { console.warn('dropped message to', peer, e.message); return false; });
 
   // Stream a File/Blob in pieces without loading it all into memory. `only` resends
-  // just the listed pieces (after the receiver reports gaps).
+  // just the listed pieces (after the receiver reports gaps). Rejects with SendTimeout if the
+  // device stops answering; the rest of the file is not sent.
   async function sendFile(peer, fid, file, only = null, cs = null) {
     const L = link(peer);
     cs = cs || (L.open ? DIRECT_CHUNK : RELAY_CHUNK);
@@ -157,6 +201,7 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     onSignal, send, sendFile,
     connect: (peer) => link(peer),
     on: (f) => handlers.add(f),
+    onReady: (f) => readyHandlers.add(f),   // f(peer) when a peer's key arrives
     path: (peer) => { const L = links[peer]; return !L ? 'none' : L.open ? 'direct' : L.key ? 'relay (encrypted)' : 'keys…'; },
     state: (peer) => links[peer]?.pc.connectionState || 'none',
   };
