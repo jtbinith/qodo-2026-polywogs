@@ -77,7 +77,7 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-I2 | Server reads relayed content | Read what passes through | A3, A5 | L | H | Sealed end to end (C9) | S3 |
 | T-I3 | Download files not shared with them | Request a file by its ID | A1 | M | H | | S10 |
 | T-I4 | See everyone's thumbnails | Join with the link and watch | A1 | H | M | | S4, S9 |
-| T-I5 | Learn where a photo was taken | Read GPS and camera details | A1 | H | H | | S6 (JPEG), S17 (other formats) |
+| T-I5 | Learn where a photo was taken | Read GPS and camera details | A1 | H | H | S6: JPEG metadata removed before sending. HEIC is sent with a warning | S17 (other formats) |
 | T-I6 | Learn someone's IP address | Read it from direct connection setup | A1 | H | L | | OQ1 |
 | T-I7 | Return later with an old link | Use a room code after the room is over | A1 | M | M | | S11 |
 | T-I8 | Find files left on a shared computer | Use the browser after someone leaves | A6 | M | M | | S13 |
@@ -116,7 +116,7 @@ Threats rated High for both likelihood and impact are fixed first: T-S1 (S2) and
 | MUC1 | Join a room from a link seen on someone's screen and download their photos | T-I3, T-I4, T-I7, T-I11 | S4, S10, S11 | Automatic (to write): a third browser joins and requests a file |
 | MUC2 | Push an explicit image onto everyone's screen | T-I4, T-R1 | S4, S9 | Manual (to write) on real devices |
 | MUC3 | Read photos relayed through the server | T-I2, T-S3 | Deaf Relay rule, S3 | Automatic (to write): a swapped key changes the four words |
-| MUC4 | Find out where the sharer lives from their photos | T-I5 | S6 | Automatic (to write): a JPEG with GPS arrives without it |
+| MUC4 | Find out where the sharer lives from their photos | T-I5 | S6 | Automatic (exists): a JPEG with GPS arrives without it (`tests/strip.test.mjs` and the two-browser test) |
 | MUC5 | Crash or freeze everyone's room | T-T2, T-D1–T-D5, T-D8 | Stranger and One Slow Phone rules, S1, S7, S14 | Automatic: malformed messages in the two-browser test (exists for 4 types). Floods and the rest (to write) |
 | MUC6 | Get someone to open an app disguised as a photo | T-E2 | S5 | Automatic (to write): a renamed .exe is refused |
 | MUC7 | Inject script through a shared link or text | T-E1 | S12 | Automatic (to write): a link containing script runs nothing |

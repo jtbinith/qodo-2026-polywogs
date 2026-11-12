@@ -12,7 +12,7 @@
     background: #0008; padding: 6px 9px; border-radius: 8px; white-space: pre; pointer-events: none; }
   #bar { position: fixed; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; }
   #bar label, #bar button { font-size: 16px; padding: 10px 14px; border-radius: 12px; border: 0; background: #ffd23f; color: #222; }
-  #bar input { display: none; }
+  #bar input[type=file] { display: none; }
   #lobby { position: fixed; inset: 0; display: grid; place-items: center; background: #2b1d14; z-index: 5; }
   #lobby form { display: grid; gap: 12px; text-align: center; }
   #lobby input { font-size: 22px; width: 11ch; text-align: center; text-transform: uppercase; letter-spacing: 3px;
@@ -40,6 +40,7 @@
 import { joinRoom } from './net.js';
 import { solveLayout } from './layout.js';
 import { createPeers } from './peers.js';
+import { prepareFile } from './strip.js';
 import { LIMITS, validPrint, validMove, validChunk, validPidMsg, validNeed, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
 
 const $ = (id) => document.getElementById(id);
@@ -122,8 +123,12 @@ $('pick').onchange = async (e) => {
   const list = [...e.target.files];
   e.target.value = '';
   let added = 0;
-  for (const file of list) {
-    if (file.size > LIMITS.fileBytes) { toast(`${file.name} is too big`); continue; }
+  const kept = [];   // files sent with their details still in them
+  for (const picked of list) {
+    if (picked.size > LIMITS.fileBytes) { toast(`${picked.name} is too big`); continue; }
+    // location and camera details come out of JPEGs before the fingerprint is taken (S6)
+    const { file, warn } = await prepareFile(picked);
+    if (warn) kept.push(file.name);
     const pid = pidOf(), thumb = await thumbOf(file), sha = await sha256Hex(file); // receivers check the file against this
     const w = 150, h = thumb ? 150 : 110;
     const p = { pid, owner: id, name: file.name.slice(0, 200) || 'file', type: file.type.slice(0, 100), size: file.size, sha,
@@ -132,7 +137,7 @@ $('pick').onchange = async (e) => {
     prints.set(pid, p); files.set(pid, file); added++;
     broadcast((peer) => announce(peer, p));
   }
-  if (added) toast(`${added} on the table`);
+  if (added) toast(`${added} on the table` + (kept.length ? `. Details not removed from ${kept.join(', ')}` : ''));
 };
 
 const others = () => Object.keys(net?.peers || {}).filter((k) => k !== id);

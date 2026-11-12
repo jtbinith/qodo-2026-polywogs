@@ -14,6 +14,7 @@ Every device in a room is a stranger: anyone with the room code can send anythin
 | `web/peers.js` | Links between devices: direct WebRTC or the encrypted relay |
 | `web/seal.js` | End-to-end encryption: ECDH P-256, HKDF, AES-256-GCM |
 | `web/check.js` | Checks for everything received from another device |
+| `web/strip.js` | Removes location and camera details from JPEG photos before sending (S6) |
 | `tests/` | Unit tests and the two-browser test |
 | `docs/` | Requirements, architecture, threat model and test plan |
 
