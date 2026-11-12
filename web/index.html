@@ -42,7 +42,7 @@ import { joinRoom } from './net.js';
 import { solveLayout } from './layout.js';
 import { createPeers, SendTimeout } from './peers.js';
 import { prepareFile } from './strip.js';
-import { LIMITS, validPrint, validMove, validChunk, validPidMsg, validNeed, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
+import { LIMITS, validPrint, validMove, validChunk, validPidMsg, validNeed, thumbFits, isRoomCode, CODE_ALPHABET, sha256Hex } from './check.js';
 
 const $ = (id) => document.getElementById(id);
 const cv = $('c'), ctx = cv.getContext('2d');
@@ -202,7 +202,9 @@ function gaveUp(to, pid, e) {
 async function done(fid, parts) {
   if (fid.startsWith('thumb:')) {
     const p = prints.get(fid.slice(6));
-    if (p) { p.thumb = new Uint8Array(await new Blob(parts).arrayBuffer()); p.img = await imgFrom(p.thumb); }
+    const thumb = new Uint8Array(await new Blob(parts).arrayBuffer());
+    // decoded only if its header says it is small (S14). Otherwise it isn't kept or passed on: a plain card
+    if (p && thumbFits(thumb)) { p.thumb = thumb; p.img = await imgFrom(thumb); }
     return;
   }
   const p = prints.get(fid); if (!p) return;
