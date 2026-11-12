@@ -61,28 +61,34 @@ test('file types are recognised from their contents', () => {
 
 test('prepareFile sends a cleaned copy with the same name and type', async () => {
   const f = new File([iphoneJpeg()], 'IMG_0001.JPG', { type: 'image/jpeg' });
-  const { file, warn } = await prepareFile(f);
+  const { file, warn } = await prepareFile(f, false);
   assert.equal(warn, undefined);
   assert.equal(file.name, 'IMG_0001.JPG'); assert.equal(file.type, 'image/jpeg');
   assert.deepEqual(await bytesOf(file), stripJpeg(iphoneJpeg()));
   assert.equal(file.size, stripJpeg(iphoneJpeg()).length, 'the size announced is the cleaned size');
 });
 
+test('"Keep details" sends the original', async () => {
+  const f = new File([iphoneJpeg()], 'IMG_0001.JPG', { type: 'image/jpeg' });
+  const { file, warn } = await prepareFile(f, true);
+  assert.equal(file, f); assert.equal(warn, undefined);
+});
+
 test('edge: a HEIC is sent unchanged with a "details not removed" warning', async () => {
   for (const f of [new File([heicFile()], 'IMG_0002.HEIC', { type: '' }), new File([heicFile()], 'IMG_0002.HEIC', { type: 'image/heic' })]) {
-    const { file, warn } = await prepareFile(f);
+    const { file, warn } = await prepareFile(f, false);
     assert.equal(file, f); assert.equal(warn, 'details not removed');
   }
 });
 
 test('a JPEG that can\'t be read is sent with the same warning', async () => {
   const f = new File([iphoneJpeg().subarray(0, 300)], 'cut.jpg', { type: 'image/jpeg' });
-  const { file, warn } = await prepareFile(f);
+  const { file, warn } = await prepareFile(f, false);
   assert.equal(file, f); assert.equal(warn, 'details not removed');
 });
 
 test('other files are sent unchanged without a warning', async () => {
   const f = new File([new Uint8Array(1000)], 'clip.mp4', { type: 'video/mp4' });
-  const { file, warn } = await prepareFile(f);
+  const { file, warn } = await prepareFile(f, false);
   assert.equal(file, f); assert.equal(warn, undefined);
 });

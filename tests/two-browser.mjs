@@ -1,7 +1,7 @@
 // The two-browser test: two browser windows play two devices. They join a room, join
 // screens, one shares photos and a video, drags them onto the other screen, and the other
 // must end up with byte-identical files. An iPhone-style JPEG must arrive with its location
-// and camera details removed, still upright (S6). Also checks a stranger's malformed messages are
+// and camera details removed, still upright, unless "Keep details" is ticked (S6). Also checks a stranger's malformed messages are
 // ignored and that a late guest can still download photos after their owner leaves.
 //
 //   node tests/two-browser.mjs           direct device-to-device path (WebRTC)
@@ -54,13 +54,18 @@ try {
     { name: 'IMG_0001.JPG', mimeType: 'image/jpeg', buffer: Buffer.from(iphoneJpeg()) },     // GPS, camera details, rotated 90°, gain map
     { name: 'IMG_0002.HEIC', mimeType: 'image/heic', buffer: Buffer.from(heicFile()) },
   ];
+  const kept = { name: 'IMG_0003.JPG', mimeType: 'image/jpeg', buffer: Buffer.from(iphoneJpeg()) };   // sent with "Keep details"
   await A.setInputFiles('#pick', files);
   await until(A, () => document.getElementById('toast').textContent.includes('on the table'));
   const said = await A.evaluate(() => document.getElementById('toast').textContent);
   check(said.includes('Details not removed from IMG_0002.HEIC') && !said.includes('IMG_0001'), `HEIC warned: "${said}"`);
-  await until(B, () => window.__t.prints.size === 5);
-  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 3);
-  check(true, 'the other device sees 5 prints with 3 thumbnails');
+  await A.check('#keep');
+  await A.setInputFiles('#pick', [kept]);
+  await A.uncheck('#keep');
+  files.push(kept);
+  await until(B, () => window.__t.prints.size === 6);
+  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 4);
+  check(true, 'the other device sees 6 prints with 4 thumbnails');
 
   // drag photo-0 and the video onto B's screen with the mouse: press on the print, move past
   // A's right edge (B's screen is joined there) and let go
@@ -77,8 +82,9 @@ try {
   await drag(A, 'photo-0.jpg', 900 + 150);   // the middle of B's screen
   await drag(A, 'clip.mp4', 900 + 150);
   await drag(A, 'IMG_0001.JPG', 900 + 150);
+  await drag(A, 'IMG_0003.JPG', 900 + 150);
   const before = await B.evaluate(() => window.__t.prints.size);
-  await until(B, () => window.__t.files.size === 3, null, 90000);
+  await until(B, () => window.__t.files.size === 4, null, 90000);
   const got = await B.evaluate(() => Promise.all([...window.__t.files.entries()].map(async ([pid, f]) => {
     const bmp = await createImageBitmap(f).catch(() => null), shown = bmp && [bmp.width, bmp.height];
     return [f.name, [...new Uint8Array(await f.arrayBuffer())], window.__t.prints.get(pid).sha, shown];
@@ -93,6 +99,8 @@ try {
     check(await exifr.orientation(buf) === 6 && shown?.[0] === 8 && shown?.[1] === 16, `${name} still upright (shown ${shown?.join(' x ')})`);
     expected[name] = sha(buf);
   }
+  const keptGot = got.find(([name]) => name === 'IMG_0003.JPG');
+  check(!!keptGot && await exifr.gps(Buffer.from(keptGot[1])) !== undefined, 'IMG_0003.JPG ("Keep details") still has its GPS');
   const path = await A.evaluate(() => { const t = window.__t; return t.peers.path(Object.keys(t.net.peers).find((k) => k !== t.id)); });
   check(RELAY ? path === 'relay (encrypted)' : path === 'direct', `went ${path}`);
 

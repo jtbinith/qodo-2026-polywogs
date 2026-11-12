@@ -89,9 +89,10 @@ export function stripJpeg(b) {
   return clean;
 }
 
-// What to send for a picked file.
+// What to send for a picked file. keep: the sender ticked "Keep details".
 // warn is set when the file still carries whatever details it had.
-export async function prepareFile(file) {
+export async function prepareFile(file, keep) {
+  if (keep) return { file };
   const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
   if (isHeic(head) || /^image\/hei[cf]/i.test(file.type)) return { file, warn: 'details not removed' };
   if (!isJpeg(head)) return { file };
