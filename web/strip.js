@@ -75,6 +75,7 @@ export function stripJpeg(b) {
     if (m === 0xff) { i++; continue; }                                 // fill byte
     if (m === 0xd9) { out.push(b.subarray(i, i + 2)); break; }         // end of the main image: anything after it is dropped
     if (m === 0xd8 || m === 0x00 || (m >= 0xd0 && m <= 0xd7)) return null;
+    if (m === 0x01) { out.push(b.subarray(i, i + 2)); i += 2; continue; }   // TEM: a marker with no length
     if (i + 4 > b.length) return null;
     const end = i + 2 + ((b[i + 2] << 8) | b[i + 3]);
     if (end < i + 4 || end > b.length) return null;
