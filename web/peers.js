@@ -194,6 +194,7 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     onSignal, send, sendFile,
     connect: (peer) => link(peer),
     on: (f) => handlers.add(f),
+    onReady: () => {},   // stub: not written yet
     path: (peer) => { const L = links[peer]; return !L ? 'none' : L.open ? 'direct' : L.key ? 'relay (encrypted)' : 'keys…'; },
     state: (peer) => links[peer]?.pc.connectionState || 'none',
   };

@@ -147,3 +147,36 @@ test('a short message to a silent device is dropped after 10 s without an error'
   await settle(); await tick(TIMEOUT);
   assert.equal(s.state, 'fulfilled');
 });
+
+// Qodo on #44: a print dropped after 10 s was still counted as announced, so a device whose
+// key came late never saw the photo. The caller must learn the message was dropped, and when
+// the key arrives, so it can announce again.
+test('a short message says whether it was sent or dropped', async () => {
+  const { peers } = room();
+  const lost = peers.send('c', { t: 'print', pid: '0123456789abcdef' });
+  await settle(); await tick(TIMEOUT);
+  assert.equal(await lost, false, 'a dropped message was reported as sent');
+  await giveKey(peers, 'b');
+  const sent = peers.send('b', { t: 'print', pid: '0123456789abcdef' });
+  await settle(); await tick(100);
+  assert.equal(await sent, true, 'a sent message was reported as dropped');
+  const late = peers.send('d', { t: 'print', pid: '0123456789abcdef' });
+  await settle(); await tick(TIMEOUT - 1000);
+  await giveKey(peers, 'd');
+  await settle(); await tick(100);
+  assert.equal(await late, true, 'a message held until the key came was reported as dropped');
+});
+
+test('the caller hears when a device\'s key arrives, but not a bad one', async () => {
+  const { peers } = room();
+  const ready = [];
+  peers.onReady((peer) => ready.push(peer));
+  peers.send('c', { t: 'print', pid: '0123456789abcdef' });
+  await settle(); await tick(TIMEOUT);
+  await giveKey(peers, 'c');                                       // the key comes after the print was dropped
+  await settle();
+  assert.deepEqual(ready, ['c']);
+  await peers.onSignal('e', { pub: 'not a key', reply: true });
+  await settle();
+  assert.deepEqual(ready, ['c'], 'a bad key was reported as ready');
+});
