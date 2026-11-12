@@ -150,7 +150,7 @@ function announce(peer, p) {
   sentTo(p.pid).add(peer);
   const { img, thumb, lastSource, ...meta } = p;
   peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 });
-  if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb]));
+  if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb])).catch(() => {});   // the receiver asks again
 }
 
 // ---------- messages between devices ----------
@@ -171,7 +171,7 @@ function onMessage(from, m, bytes) {
     const p = prints.get(m.pid); if (p && drag?.p !== p) { p.anchor = m.anchor; p.x = m.x; p.y = m.y; }
   } else if (m.t === 'want') {           // someone wants the full photo
     const file = validPidMsg(m) && files.get(m.pid);
-    if (file) peers.sendFile(from, m.pid, file);
+    if (file) peers.sendFile(from, m.pid, file).catch(() => gaveUp(from, m.pid));
   } else if (m.t === 'have') {           // someone now holds the bytes
     const p = validPidMsg(m) && prints.get(m.pid);
     if (p && !p.holders.includes(from) && p.holders.length < 50) p.holders.push(from);
@@ -181,7 +181,7 @@ function onMessage(from, m, bytes) {
     const thumb = prints.get(pid)?.thumb;
     const src = m.fid.startsWith('thumb:') ? (thumb && new Blob([thumb])) : files.get(pid);
     const cs = LIMITS.chunkSizes.includes(m.cs) ? m.cs : null;
-    if (src) peers.sendFile(from, m.fid, src, m.missing, m.missing ? cs : null);
+    if (src) peers.sendFile(from, m.fid, src, m.missing, m.missing ? cs : null).catch(() => m.fid === pid && gaveUp(from, pid));
   } else if (m.t === 'chunk') {
     const inc = incoming.get(m.fid);
     if (!inc || inc.from !== from || !validChunk(m, bytes, inc)) return;
@@ -191,6 +191,10 @@ function onMessage(from, m, bytes) {
     if (inc.got === inc.n) { incoming.delete(m.fid); done(m.fid, inc.parts); }
   }
   // any other message type has no check, so it is dropped
+}
+// A send was cancelled because the other device stopped answering (S1.3). They can ask again.
+function gaveUp(to, pid) {
+  toast(`Couldn’t send ${prints.get(pid)?.name || 'a photo'} to ${net.peers[to]?.name || 'a device'}: it stopped answering`);
 }
 async function done(fid, parts) {
   if (fid.startsWith('thumb:')) {
