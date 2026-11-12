@@ -205,7 +205,7 @@ try {
       t = v; const sig = v.net.signal, on = v.peers.onSignal;
       v.net.signal = (to, d) => (d?.pub && !window.__keySent ? held.push([to, d]) : sig(to, d));
       v.peers.onSignal = (from, d) => {
-        if (d?.pub && !heard) { heard = Date.now(); setTimeout(() => { window.__keySent = Date.now(); v.net.signal = sig; held.splice(0).forEach(([to, x]) => sig(to, x)); }, late); }
+        if (d?.pub && !heard) { heard = Date.now(); setTimeout(() => { window.__printsAtKey = [...t.prints.keys()]; window.__keySent = Date.now(); v.net.signal = sig; held.splice(0).forEach(([to, x]) => sig(to, x)); }, late); }
         return on(from, d);
       };
     } });
@@ -221,7 +221,7 @@ try {
   const B2 = await device(390, 700, { at: late, relay: true, init: `(${holdKey})(${KEY_LATE})` });
   const b2id = await until(B2, () => window.__t && window.__t.id).then((h) => h.jsonValue());
   await until(B2, () => window.__keySent, null, KEY_LATE + 20000);
-  const early = await B2.evaluate((pid) => window.__t.prints.has(pid), pid);
+  const early = await B2.evaluate((pid) => window.__printsAtKey.includes(pid), pid);   // B's prints as the key left, not now
   check(!early && dropped.some((d) => d.includes(b2id)), `A dropped its print to B while B's key was late (${dropped.find((d) => d.includes(b2id)) || 'nothing dropped'})`);
   const heard = await until(B2, (pid) => window.__t.prints.has(pid), pid, 20000).then(() => true, () => false);
   const took = await B2.evaluate(() => ((Date.now() - window.__keySent) / 1000).toFixed(1));
