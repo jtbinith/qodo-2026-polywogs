@@ -135,14 +135,16 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
   }
 
   // One relay queue for the whole page, paced so we don't trip the server's rate limit.
-  // Only frames whose key is ready go in it. Resolves true once the frame is sent.
+  // Only frames whose key is ready go in it. Resolves true once the frame is sent. A frame
+  // that fails (seal or signal throws) rejects only its own send: the queue carries on.
   let relayTail = Promise.resolve();
   function enqueue(peer, L, buf) {
-    relayTail = relayTail.then(async () => {
+    const sent = relayTail.then(async () => {
       signal(peer, { r: b64(await seal(L.key, buf, myId, peer)) });
       await new Promise((r) => setTimeout(r, RELAY_GAP));
     });
-    return relayTail.then(() => true);
+    relayTail = sent.catch(() => {});
+    return sent.then(() => true);
   }
   // Resolves true if the frame was sent, false if it was dropped.
   function relay(peer, buf) {
