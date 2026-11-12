@@ -1,11 +1,12 @@
 // Removes location and camera details from JPEG photos before they are shared (S6).
 // Anyone in the room can read a photo's metadata, and GPS can show where someone lives.
 //
-// Kept: the picture itself (tables, frame and scans), JFIF, the ICC colour profile, Adobe's
-// colour-transform segment and the EXIF Orientation, rewritten on its own so the photo stays
-// upright. Removed: the rest of EXIF (GPS, camera, dates, maker notes, thumbnail), XMP, IPTC
-// (APP13), comments, MPF and every other APPn segment, and anything after the main image
-// ends, such as an iPhone's HDR gain map. The fingerprint is taken of the cleaned file.
+// Kept: the picture itself (tables, frame and scans), JFIF (without a thumbnail), the ICC colour
+// profile, the fixed fields of Adobe's colour-transform segment and the EXIF Orientation,
+// rewritten on its own so the photo stays upright. Removed: the rest of EXIF (GPS, camera,
+// dates, maker notes, thumbnail), XMP, IPTC (APP13), comments, MPF and every other APPn
+// segment, and anything after the main image ends, such as an iPhone's HDR gain map.
+// The fingerprint is taken of the cleaned file.
 // Other formats (HEIC, PNG, WebP, video) are sent unchanged with a warning for now (S17).
 
 export const isJpeg = (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
@@ -42,13 +43,25 @@ function orientationSegment(v) {
     0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, v, 0, 0, 0, 0, 0, 0);   // one entry: Orientation, SHORT; no next IFD
 }
 
-// Segments kept as they are.
+// A segment's first n payload bytes, as a segment of their own.
+function fixed(seg, n) {
+  const s = seg.slice(0, 4 + n);
+  s[2] = (n + 2) >> 8; s[3] = (n + 2) & 0xff;
+  return s;
+}
+
+// What is kept of a segment, or null to drop it. JFIF and Adobe keep only their fixed fields,
+// so nothing extra (a JFIF thumbnail or bytes tacked on the end) comes with them.
 function keep(marker, seg) {
-  if (marker === 0xe0) return true;                                   // JFIF
-  if (marker === 0xe2) return startsWith(seg, 'ICC_PROFILE\0');        // colour profile (not MPF or FlashPix)
-  if (marker === 0xee) return startsWith(seg, 'Adobe');                // colour transform, needed to decode some CMYK/RGB files
-  if (marker >= 0xe0 && marker <= 0xef) return false;                  // EXIF, XMP, IPTC and the rest
-  return marker !== 0xfe;                                              // comments go, image tables stay
+  if (marker === 0xe0) {                                              // JFIF, without its thumbnail
+    if (!startsWith(seg, 'JFIF\0') || seg.length < 18) return null;
+    const s = fixed(seg, 14); s[16] = 0; s[17] = 0;
+    return s;
+  }
+  if (marker === 0xe2) return startsWith(seg, 'ICC_PROFILE\0') ? seg : null;   // colour profile (not MPF or FlashPix)
+  if (marker === 0xee) return startsWith(seg, 'Adobe') && seg.length >= 16 ? fixed(seg, 12) : null;   // colour transform, needed to decode some CMYK/RGB files
+  if (marker >= 0xe0 && marker <= 0xef) return null;                  // EXIF, XMP, IPTC and the rest
+  return marker === 0xfe ? null : seg;                                // comments go, image tables stay
 }
 
 // The JPEG without its metadata, or null if it isn't a JPEG that can be read to the end.
@@ -67,7 +80,8 @@ export function stripJpeg(b) {
     if (end < i + 4 || end > b.length) return null;
     const seg = b.subarray(i, end);
     if (m === 0xe1 && !orientation) orientation = orientationOf(seg);
-    if (keep(m, seg)) { out.push(seg); if (m === 0xe0 && at === out.length - 1) at = out.length; }
+    const kept = keep(m, seg);
+    if (kept) { out.push(kept); if (m === 0xe0 && at === out.length - 1) at = out.length; }
     i = end;
     if (m === 0xda) {                                                  // a scan: its data runs to the next real marker
       let j = i;
