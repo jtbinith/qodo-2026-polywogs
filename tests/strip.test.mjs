@@ -104,6 +104,13 @@ test('edge: a HEIC is sent unchanged with a "details not removed" warning', asyn
   }
 });
 
+test('a JPEG named or typed as HEIC is still cleaned', async () => {
+  const f = new File([iphoneJpeg()], 'IMG_0004.HEIC', { type: 'image/heic' });
+  const { file, warn } = await prepareFile(f, false);
+  assert.equal(warn, undefined);
+  assert.deepEqual(await bytesOf(file), stripJpeg(iphoneJpeg()));
+});
+
 test('a JPEG that can\'t be read is sent with the same warning', async () => {
   const f = new File([iphoneJpeg().subarray(0, 300)], 'cut.jpg', { type: 'image/jpeg' });
   const { file, warn } = await prepareFile(f, false);
