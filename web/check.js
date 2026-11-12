@@ -5,6 +5,7 @@
 export const LIMITS = {
   fileBytes: 200 * 1024 * 1024,  // biggest file we'll accept (held in memory while it arrives)
   thumbBytes: 512 * 1024,
+  thumbSide: 400,                // widest or tallest thumbnail we'll decode, in pixels (S14)
   chunkSizes: [24 * 1024, 64 * 1024], // the only piece sizes a sender may use
   incoming: 20,                  // transfers arriving at once
   prints: 500,
@@ -60,6 +61,9 @@ export function validMissing(list) {
 // (50 bits), so nobody can guess or list them. Hand-typed short codes are refused.
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const isRoomCode = (c) => typeof c === 'string' && /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{10}$/.test(c);
+
+// A received thumbnail is decoded only if this accepts it (S14). Stub: not written yet.
+export const thumbFits = (b) => true;
 
 // File ids on the wire: a print id, or "thumb:" + a print id for its thumbnail.
 export const isFid = (v) => isPid(v) || (typeof v === 'string' && v.startsWith('thumb:') && isPid(v.slice(6)));

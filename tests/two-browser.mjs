@@ -4,7 +4,7 @@
 // and camera details removed, still upright, unless "Keep details" is ticked (S6). Also checks a stranger's malformed messages are
 // ignored, that a send to a device that never answers gives up after 10 s without holding up
 // anyone else (S1.3), that a print dropped while a device's key was late is announced again
-// once the key comes (S1.3) and that a late guest can still download photos after their owner leaves.
+// once the key comes (S1.3), that a thumbnail over 400 x 400 is never decoded (S14) and that a late guest can still download photos after their owner leaves.
 //
 //   node tests/two-browser.mjs           direct device-to-device path (WebRTC)
 //   node tests/two-browser.mjs --relay   force the end-to-end encrypted relay path
@@ -13,7 +13,7 @@
 import { chromium } from 'playwright';
 import { createHash, randomBytes } from 'node:crypto';
 import { serve } from './serve.mjs';
-import { iphoneJpeg, heicFile, exifr } from './jpeg-fixtures.mjs';
+import { iphoneJpeg, heicFile, exifr, sizedJpeg } from './jpeg-fixtures.mjs';
 
 const RELAY = process.argv.includes('--relay');
 const server = await serve(0);
@@ -182,6 +182,35 @@ try {
   check(after.prints === before, 'malformed print ignored');
   check(after.got === 0, 'bad pieces for a real transfer were dropped');
   check(after.sent === 0, 'malformed requests caused no resend');
+  // thumbnails over 400 x 400 are never decoded: the print shows a plain card (S14). A sends
+  // B a real 400 x 400 thumbnail (decoded), a real 401 x 400 one and a 1 KB "image bomb" whose
+  // header claims 30000 x 30000 (neither decoded). B counts what reaches the image decoder
+  await B.evaluate(() => { const t = window.__t, real = window.createImageBitmap; t.decoded = [];
+    window.createImageBitmap = (src, ...a) => { t.decoded.push(src?.size ?? -1); return real(src, ...a); }; });
+  const thumbs = await A.evaluate(async ([b, bomb]) => {
+    const t = window.__t, jpeg = (w, h) => new Promise((ok) => { const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').fillRect(0, 0, w, h); c.toBlob(async (x) => ok(new Uint8Array(await x.arrayBuffer())), 'image/jpeg', 0.7); });
+    const out = {};
+    for (const [label, bytes] of [['400 x 400', await jpeg(400, 400)], ['401 x 400', await jpeg(401, 400)], ['30000 x 30000 bomb', new Uint8Array(bomb)]]) {
+      const pid = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, '0')).join('');
+      t.peers.send(b, { t: 'print', pid, owner: t.id, anchor: t.id, name: label, type: 'image/jpeg', size: 10, sha: 'a'.repeat(64),
+        x: 10, y: 10, w: 150, h: 150, rot: 0, holders: [t.id], thumbSize: bytes.length });
+      t.peers.sendFile(b, 'thumb:' + pid, new Blob([bytes]));
+      out[label] = { pid, size: bytes.length };
+    }
+    return out;
+  }, [ids.b, [...sizedJpeg(30000, 30000)]]);
+  const arrived = (pids) => pids.every((pid) => window.__t.prints.has(pid) && !window.__t.incoming.has('thumb:' + pid));
+  await until(B, arrived, Object.values(thumbs).map((x) => x.pid));
+  await until(B, (pid) => !!window.__t.prints.get(pid).img, thumbs['400 x 400'].pid, 10000).catch(() => {});
+  const shown = await B.evaluate((thumbs) => Object.fromEntries(Object.entries(thumbs).map(([label, { pid, size }]) => {
+    const p = window.__t.prints.get(pid);
+    return [label, { img: p.img ? [p.img.width, p.img.height] : null, kept: !!p.thumb, decoded: window.__t.decoded.includes(size) }];
+  })), thumbs);
+  check(shown['400 x 400'].img?.[0] === 400 && shown['400 x 400'].img?.[1] === 400, `a 400 x 400 thumbnail is shown (${JSON.stringify(shown['400 x 400'])})`);
+  for (const label of ['401 x 400', '30000 x 30000 bomb'])
+    check(!shown[label].img && !shown[label].kept && !shown[label].decoded, `a ${label} thumbnail isn't decoded and the print shows a plain card (${JSON.stringify(shown[label])})`);
+
   // a late guest still gets photos B holds after A (the owner) leaves
   await A.context().close();
   const C = await device(390, 700);

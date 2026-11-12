@@ -96,3 +96,22 @@ export const androidJpeg = () => concat(plainJpeg.subarray(0, APP0), exifApp1({ 
 export const iphoneImage = () => body(plainJpeg);
 // A HEIC file's first bytes: an ISO BMFF 'ftyp' box with the heic brand.
 export const heicFile = () => concat(Uint8Array.of(0, 0, 0, 24), enc('ftypheic'), Uint8Array.of(0, 0, 0, 0), enc('mif1heic'), new Uint8Array(200));
+
+// Thumbnail fixtures for S14. Only the frame header (SOF) changes, so the size a decoder
+// would allocate for changes while the file stays tiny.
+const sofAt = (j) => j.findIndex((v, i) => v === 0xff && j[i + 1] >= 0xc0 && j[i + 1] <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(j[i + 1]));
+// plainJpeg claiming to be w x h, with frame type `marker` (C0 baseline, C2 progressive, C3 lossless...).
+export function sizedJpeg(w, h, { from = plainJpeg, marker } = {}) {
+  const j = from.slice(), at = sofAt(j);
+  if (marker) j[at + 1] = marker;
+  j[at + 5] = h >> 8; j[at + 6] = h & 0xff; j[at + 7] = w >> 8; j[at + 8] = w & 0xff;
+  return j;
+}
+// A small frame header followed by a second, enormous one.
+export function twoFrameJpeg() {
+  const at = sofAt(plainJpeg), len = (plainJpeg[at + 2] << 8) | plainJpeg[at + 3];
+  const big = sizedJpeg(30000, 30000).subarray(at, at + 2 + len);
+  return concat(plainJpeg.subarray(0, at + 2 + len), big, plainJpeg.subarray(at + 2 + len));
+}
+// The first bytes of a 16 x 8 PNG: signature and IHDR.
+export const smallPng = () => Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 16, 0, 0, 0, 8, 8, 2, 0, 0, 0, 0, 0, 0, 0);
