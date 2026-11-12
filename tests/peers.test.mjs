@@ -195,7 +195,8 @@ test('one relay frame that fails to send doesn\'t block later frames', async () 
   await settle(); await tick(100);
   assert.equal(await bad, false, 'the failed frame was reported as sent');
   const good = peers.send('b', { t: 'print', pid: '0123456789abcdef' });
-  await settle(); await tick(100);
-  assert.equal(frames('b'), 1, 'a later frame to another device never went out');
+  // sealing uses real WebCrypto, outside the mocked clock: wait for the frame before moving the clock
+  await waitFor(() => frames('b') === 1);
+  await tick(100);
   assert.equal(await good, true, 'a later frame to another device was reported as dropped');
 });
