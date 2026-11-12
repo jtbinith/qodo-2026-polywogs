@@ -30,6 +30,9 @@ You get an issue number. Read the ticket from GitHub with `gh issue view`, never
 
 ## 4. Implement
 - Follow every rule in AGENTS.md. Make the smallest change that meets the acceptance. Nothing unrelated.
+- If the change makes something fail that used to wait or succeed, check every caller that assumed it succeeded.
+- A two-browser scenario that depends on one path (direct or relay) forces that path for its own devices.
+- A "hasn't happened yet" check is recorded in the page at the moment the condition changes, not read afterwards.
 - Run `npm test`: unit tests and the two-browser test, direct and relay. Keep the passing output for the PR's **Tested** section. If a run couldn't happen, say so. Never claim a pass you didn't see.
 
 ## 5. Update the docs
