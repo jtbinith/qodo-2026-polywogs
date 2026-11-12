@@ -58,7 +58,7 @@ try {
   await A.setInputFiles('#pick', files);
   await until(A, () => document.getElementById('toast').textContent.includes('on the table'));
   const said = await A.evaluate(() => document.getElementById('toast').textContent);
-  check(said.includes('Details not removed from IMG_0002.HEIC') && !said.includes('IMG_0001'), `HEIC warned: "${said}"`);
+  check(/Details not removed from .*clip\.mp4/.test(said) && said.includes('IMG_0002.HEIC') && !said.includes('IMG_0001'), `video and HEIC warned: "${said}"`);
   await A.check('#keep');
   await A.setInputFiles('#pick', [kept]);
   await A.uncheck('#keep');

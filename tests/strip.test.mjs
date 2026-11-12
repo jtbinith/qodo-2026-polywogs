@@ -117,8 +117,16 @@ test('a JPEG that can\'t be read is sent with the same warning', async () => {
   assert.equal(file, f); assert.equal(warn, 'details not removed');
 });
 
-test('other files are sent unchanged without a warning', async () => {
-  const f = new File([new Uint8Array(1000)], 'clip.mp4', { type: 'video/mp4' });
-  const { file, warn } = await prepareFile(f, false);
-  assert.equal(file, f); assert.equal(warn, undefined);
+test('videos, PNGs and other files are sent unchanged with the same warning', async () => {
+  const enc = (t) => new TextEncoder().encode(t);
+  const files = [
+    new File([concat(Uint8Array.of(0, 0, 0, 20), enc('ftypqt  '), new Uint8Array(1000))], 'IMG_0005.MOV', { type: 'video/quicktime' }),
+    new File([concat(Uint8Array.of(0, 0, 0, 24), enc('ftypmp42'), new Uint8Array(1000))], 'clip.mp4', { type: 'video/mp4' }),
+    new File([concat(Uint8Array.of(0x89), enc('PNG\r\n\x1a\n'), new Uint8Array(100))], 'shot.png', { type: 'image/png' }),
+    new File([concat(enc('RIFF'), new Uint8Array(4), enc('WEBP'), new Uint8Array(100))], 'pic.webp', { type: 'image/webp' }),
+  ];
+  for (const f of files) {
+    const { file, warn } = await prepareFile(f, false);
+    assert.equal(file, f); assert.equal(warn, 'details not removed', f.name);
+  }
 });
