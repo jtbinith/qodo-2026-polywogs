@@ -117,12 +117,13 @@ flowchart LR
 Metadata must be removed before the SHA-256 is taken. Otherwise the receiver's fingerprint check fails.
 
 ## 8. Engineering rules
-The five rules in [AGENTS.md](../AGENTS.md) shape the design:
+The rules in [AGENTS.md](../AGENTS.md) shape the design:
 1. **Stranger:** every message from another device is checked or dropped.
 2. **Deaf Relay:** the room server only ever sees sealed bytes.
 3. **One Slow Phone:** no device can hold up anyone else.
 4. **Fingerprint:** a file is kept only if it matches its fingerprint.
 5. **Two-Browser:** joining and transfer changes pass the two-browser test before merging.
+6. **Allowlist:** metadata leaves the device only as fields we have named and chosen to keep.
 
 ## 9. Dependencies
 | Dependency | Used for | Notes |
