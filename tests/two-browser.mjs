@@ -2,7 +2,8 @@
 // screens, one shares photos and a video, drags them onto the other screen, and the other
 // must end up with byte-identical files. An iPhone-style JPEG must arrive with its location
 // and camera details removed, still upright, unless "Keep details" is ticked (S6). Also checks a stranger's malformed messages are
-// ignored and that a late guest can still download photos after their owner leaves.
+// ignored, that a send to a device that never answers gives up after 10 s without holding up
+// anyone else (S1.3) and that a late guest can still download photos after their owner leaves.
 //
 //   node tests/two-browser.mjs           direct device-to-device path (WebRTC)
 //   node tests/two-browser.mjs --relay   force the end-to-end encrypted relay path
@@ -135,6 +136,20 @@ try {
   check(!!keptGot && await exifr.gps(Buffer.from(keptGot[1])) !== undefined, 'IMG_0003.JPG ("Keep details") still has its GPS');
   const path = await A.evaluate(() => { const t = window.__t; return t.peers.path(Object.keys(t.net.peers).find((k) => k !== t.id)); });
   check(RELAY ? path === 'relay (encrypted)' : path === 'direct', `went ${path}`);
+
+  // a device that never sends its key asks A for a photo. A gives up after 10 s and says so,
+  // while A and B keep transferring (S1.3)
+  const GHOST = 'zzzzsilent';
+  const asked = Date.now();
+  await A.evaluate((ghost) => { const t = window.__t, p = [...t.prints.values()].find((p) => p.name === 'photo-1.jpg');
+    t.onMessage(ghost, { t: 'want', pid: p.pid }); }, GHOST);
+  await drag(A, 'photo-1.jpg', 900 + 150);
+  await until(B, () => window.__t.files.size === 5, null, 60000);
+  const gaveUpEarly = await A.evaluate(() => document.getElementById('toast').textContent.includes('Couldn’t send'));
+  check(!gaveUpEarly, `photo-1.jpg reached B after ${((Date.now() - asked) / 1000).toFixed(1)} s, while A still waited on the silent device`);
+  const toldSender = await A.waitForFunction(() => document.getElementById('toast').textContent.includes('Couldn’t send'), null, { timeout: 20000 }).then(() => true, () => false);
+  const waited = (Date.now() - asked) / 1000;
+  check(toldSender && waited >= 10 && waited < 20, `send to a silent device gave up and told the sender (after ${waited.toFixed(1)} s)`);
 
   // a stranger's malformed messages change nothing, even when aimed at a real transfer
   const ids = await A.evaluate(() => { const t = window.__t; return { a: t.id, b: Object.keys(t.net.peers).find((k) => k !== t.id) }; });

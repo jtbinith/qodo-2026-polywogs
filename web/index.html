@@ -330,7 +330,7 @@ function start(room) {
   net.on((ev) => {
     if (ev === 'joined') toast('Screens joined ✨');
   });
-  window.__t = { net, peers, prints, files, incoming, expect, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
+  window.__t = { net, peers, prints, files, incoming, expect, onMessage, id, screenAt, dropped, newCode, world, setWorld, get layout() { return layout; } };
 }
 // Only codes made by New room are accepted: a hand-typed code like TEST is easy to guess.
 function tryStart(code) {
