@@ -1,0 +1,17 @@
+name: Feature
+description: Something new a user can do
+title: "ID · "
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance (Given / When / Then)
+    validations:
+      required: true

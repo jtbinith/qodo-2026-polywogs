@@ -1,0 +1,11 @@
+name: Chore
+description: Setup, tests or docs that users don't see
+title: "ID · "
+labels: ["type: chore"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+    validations:
+      required: true

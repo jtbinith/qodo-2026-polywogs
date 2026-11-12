@@ -1,0 +1,17 @@
+name: Enhancement
+description: An improvement to something that exists
+title: "ID · "
+labels: ["type: enhancement"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance (Given / When / Then)
+    validations:
+      required: true

@@ -1,0 +1,17 @@
+name: Security
+description: Planned security work from the threat model. To report a vulnerability, use "Report a vulnerability privately" instead
+title: "ID · "
+labels: ["type: security"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary (include the threat ID)
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance (the attack fails)
+    validations:
+      required: true
