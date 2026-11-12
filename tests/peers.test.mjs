@@ -28,7 +28,8 @@ afterEach(() => mock.timers.reset());
 // Let real async work (file reads, crypto) finish. setImmediate isn't mocked.
 const settle = async (n = 50) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
 const tick = async (ms) => { mock.timers.tick(ms); await settle(); };
-async function waitFor(cond) { for (let i = 0; i < 5000 && !cond(); i++) await new Promise((r) => setImmediate(r)); assert.ok(cond(), 'condition never met'); }
+// Real time, not loop turns: WebCrypto runs outside the mocked clock and can be slow on a busy machine.
+async function waitFor(cond, msg = 'condition never met', ms = 2000) { const start = Date.now(); while (!cond() && Date.now() - start < ms) await new Promise((r) => setImmediate(r)); assert.ok(cond(), msg); }
 function watch(p) {
   const s = { state: 'pending' };
   p.then(() => { s.state = 'fulfilled'; }, (e) => { s.state = 'rejected'; s.error = e; });
@@ -129,7 +130,7 @@ test('a silent device times out while two others keep transferring', async () =>
   const silent = watch(peers.sendFile('c', 'f1', file(100)));
   await settle();
   const live = watch(peers.sendFile('b', 'f2', file(100)));
-  await waitFor(() => frames('b') === 1);
+  await waitFor(() => frames('b') === 1, 'a later frame to another device never went out');
   await tick(100);
   assert.equal(live.state, 'fulfilled', 'the silent device held up the other transfer');
   assert.equal(silent.state, 'pending');
@@ -196,7 +197,7 @@ test('one relay frame that fails to send doesn\'t block later frames', async () 
   assert.equal(await bad, false, 'the failed frame was reported as sent');
   const good = peers.send('b', { t: 'print', pid: '0123456789abcdef' });
   // sealing uses real WebCrypto, outside the mocked clock: wait for the frame before moving the clock
-  await waitFor(() => frames('b') === 1);
+  await waitFor(() => frames('b') === 1, 'a later frame to another device never went out');
   await tick(100);
   assert.equal(await good, true, 'a later frame to another device was reported as dropped');
 });
