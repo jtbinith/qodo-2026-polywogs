@@ -1,0 +1,17 @@
+name: Security
+description: Stop an attack from the threat model
+title: "ID · "
+labels: ["type: security"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary (include the threat ID)
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance (the attack fails)
+    validations:
+      required: true
