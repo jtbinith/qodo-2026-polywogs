@@ -26,6 +26,7 @@ You get an issue number. Read the ticket from GitHub with `gh issue view`, never
 ## 3. Test first
 - Write a test for every acceptance criterion and edge case before changing the code: `tests/*.test.mjs` for units, `tests/two-browser.mjs` for device behaviour.
 - Run them and keep the failing output for the PR's **Red** section. Red must be an assertion failure, not an import or syntax error: add a stub first if the code doesn't exist yet.
+- Commit the new tests on their own (`test: …`) before implementing. Then commit the implementation (`feat:` or `fix: …`). Anyone can then check out the test commit and watch it fail.
 
 ## 4. Implement
 - Follow every rule in AGENTS.md. Make the smallest change that meets the acceptance. Nothing unrelated.
@@ -38,6 +39,7 @@ You get an issue number. Read the ticket from GitHub with `gh issue view`, never
 
 ## 6. Stop before pushing
 - Commit using Conventional Commits in plain English, for example `fix: drop setup from unknown devices`.
+- A criterion you can't check yourself (a real device, an account) stays unticked in Acceptance. List it under Notes as needing the user.
 - **Do not push.** End with your report and the PR description, filled in from `.github/pull_request_template.md`: ticket, PRD and threat IDs, each criterion with its result, the edge case, Red and Tested.
 - Push only after the user says yes in the main session. Then: `git push -u origin <branch>`, `gh pr create --body-file <description>` and move the card to **In Review**.
 
@@ -45,7 +47,7 @@ You get an issue number. Read the ticket from GitHub with `gh issue view`, never
 Started separately, for example "handle the review of #N".
 - Read the findings: `gh pr view <PR> --json comments,reviews` for Qodo's summary and `gh api repos/{owner}/{repo}/pulls/<PR>/comments` for inline comments. Use `--json`: the plain `--comments` form fails here and can print nothing while still exiting 0.
 - For each Qodo finding, say whether it is confirmed, wrong or out of scope, checked against the code and the ticket. Note anything the ticket asked for that the review didn't check.
-- Fix confirmed findings test first. Rerun `npm test`. Stop before pushing, as in step 6.
+- Fix confirmed findings test first: a `test:` commit, then a `fix:` commit, for each finding. Rerun `npm test`. Stop before pushing, as in step 6.
 - Say whether the ticket itself was wrong.
 - Decide whether a finding calls for a rule in AGENTS.md, a change to this skill or more context for the reviewer. Propose the exact wording in your report. Don't make the change yourself. Only the user approves it. It goes in its own PR (never in a ticket's PR). It merges before the next ticket starts.
 - After the merge, move the card to **Done**.
