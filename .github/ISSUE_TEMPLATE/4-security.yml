@@ -1,5 +1,5 @@
 name: Security
-description: Stop an attack from the threat model
+description: Planned security work from the threat model. To report a vulnerability, use "Report a vulnerability privately" instead
 title: "ID · "
 labels: ["type: security"]
 body:
