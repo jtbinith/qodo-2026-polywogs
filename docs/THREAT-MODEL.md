@@ -95,7 +95,7 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-D5 | Stop someone joining screens | Send forged clock replies | A1 | L | M | | S1.4 |
 | T-D6 | Exhaust the free quota | Use the key to send large numbers of messages | A4 | M | M | | S8 |
 | T-D7 | Run a phone out of memory | Send several very large files at once | A1 | M | M | 200 MB per file (C14) | S1.2 |
-| T-D8 | Image bomb | Send a small thumbnail with enormous dimensions that uses gigabytes of memory while it decodes | A1 | M | M | Full files are never decoded on arrival. A thumbnail is decoded only if its JPEG header says it is at most 400 × 400 (S14). Otherwise the print shows a plain card | |
+| T-D8 | Image bomb | Send a small thumbnail with enormous dimensions that uses gigabytes of memory while it decodes | A1 | M | M | Full files are never decoded on arrival. A thumbnail is decoded only if its JPEG header says it is at most 400 × 400 and nothing follows its end marker, where a gain map could hide (S14). Otherwise the print shows a plain card | |
 | T-D9 | The room stops working if the host's key is lost | The host's page reloads or closes. Shared links no longer match the time keeper. An attacker could also try to force this | — | M | H | | Host key kept between reloads (ARCHITECTURE.md Keys). A new link if it is lost |
 
 ### 4.6 Elevation of privilege

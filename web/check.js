@@ -76,7 +76,7 @@ export function thumbFits(b) {
     if (i + 2 > b.length || b[i] !== 0xff) return false;
     const m = b[i + 1];
     if (m === 0xff) { i++; continue; }                                 // fill byte
-    if (m === 0xd9) break;                                             // end of image
+    if (m === 0xd9) { if (i + 2 !== b.length) return false; break; }   // end of image, and nothing after it (no gain map)
     if (m === 0xd8 || m === 0x00 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) return false;
     if (i + 4 > b.length) return false;
     const end = i + 2 + ((b[i + 2] << 8) | b[i + 3]);
