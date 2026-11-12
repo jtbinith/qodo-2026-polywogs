@@ -1,6 +1,7 @@
 // The two-browser test: two browser windows play two devices. They join a room, join
 // screens, one shares photos and a video, drags them onto the other screen, and the other
-// must end up with byte-identical files. Also checks a stranger's malformed messages are
+// must end up with byte-identical files. An iPhone-style JPEG must arrive with its location
+// and camera details removed, still upright, unless "Keep details" is ticked (S6). Also checks a stranger's malformed messages are
 // ignored and that a late guest can still download photos after their owner leaves.
 //
 //   node tests/two-browser.mjs           direct device-to-device path (WebRTC)
@@ -10,6 +11,7 @@
 import { chromium } from 'playwright';
 import { createHash, randomBytes } from 'node:crypto';
 import { serve } from './serve.mjs';
+import { iphoneJpeg, heicFile, exifr } from './jpeg-fixtures.mjs';
 
 const RELAY = process.argv.includes('--relay');
 const server = await serve(0);
@@ -49,17 +51,60 @@ try {
     { name: 'photo-0.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(images[0]) },
     { name: 'photo-1.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(images[1]) },
     { name: 'clip.mp4', mimeType: 'video/mp4', buffer: randomBytes(60000) },
+    { name: 'IMG_0001.JPG', mimeType: 'image/jpeg', buffer: Buffer.from(iphoneJpeg()) },     // GPS, camera details, rotated 90°, gain map
+    { name: 'IMG_0002.HEIC', mimeType: 'image/heic', buffer: Buffer.from(heicFile()) },
   ];
+  const kept = { name: 'IMG_0003.JPG', mimeType: 'image/jpeg', buffer: Buffer.from(iphoneJpeg()) };   // sent with "Keep details"
   await A.setInputFiles('#pick', files);
-  await until(B, () => window.__t.prints.size === 3);
-  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 2);
-  check(true, 'the other device sees 3 prints with 2 thumbnails');
+  await until(A, () => document.getElementById('toast').textContent.includes('on the table'));
+  const said = await A.evaluate(() => document.getElementById('toast').textContent);
+  check(/Details not removed from .*clip\.mp4/.test(said) && said.includes('IMG_0002.HEIC') && !said.includes('IMG_0001'), `video and HEIC warned: "${said}"`);
+  await A.check('#keep');
+  await A.setInputFiles('#pick', [kept]);
+  await A.uncheck('#keep');
+  files.push(kept);
+
+  // ticking "Keep details" while a batch is still being prepared changes nothing for that batch:
+  // the choice is the one made when the files were picked
+  const batch = ['IMG_0004.JPG', 'IMG_0005.JPG'];
+  await A.evaluate(([bytes, names]) => {
+    const pick = document.getElementById('pick'), dt = new DataTransfer();
+    for (const n of names) dt.items.add(new File([new Uint8Array(bytes)], n, { type: 'image/jpeg' }));
+    pick.files = dt.files;
+    pick.dispatchEvent(new Event('change'));
+    document.getElementById('keep').checked = true;   // ticked for the next pick, while this one is still running
+  }, [[...iphoneJpeg()], batch]);
+  await until(A, (names) => names.every((n) => [...window.__t.prints.values()].some((p) => p.name === n)), batch);
+  await A.uncheck('#keep');
+  const held = await A.evaluate((names) => Promise.all([...window.__t.prints.values()].filter((p) => names.includes(p.name))
+    .map(async (p) => [p.name, [...new Uint8Array(await window.__t.files.get(p.pid).arrayBuffer())]])), batch);
+  for (const [name, bytes] of held) check(await exifr.gps(Buffer.from(bytes)) === undefined, `${name} cleaned though "Keep details" was ticked mid-batch`);
+
+  // the mirror: ticked when picked, unticked mid-batch. The batch keeps its details, as chosen at pick time
+  const kbatch = ['IMG_0006.JPG', 'IMG_0007.JPG'];
+  await A.check('#keep');
+  await A.evaluate(([bytes, names]) => {
+    const pick = document.getElementById('pick'), dt = new DataTransfer();
+    for (const n of names) dt.items.add(new File([new Uint8Array(bytes)], n, { type: 'image/jpeg' }));
+    pick.files = dt.files;
+    pick.dispatchEvent(new Event('change'));
+    document.getElementById('keep').checked = false;   // unticked for the next pick, while this one is still running
+  }, [[...iphoneJpeg()], kbatch]);
+  await until(A, (names) => names.every((n) => [...window.__t.prints.values()].some((p) => p.name === n)), kbatch);
+  const kheld = await A.evaluate((names) => Promise.all([...window.__t.prints.values()].filter((p) => names.includes(p.name))
+    .map(async (p) => [p.name, [...new Uint8Array(await window.__t.files.get(p.pid).arrayBuffer())]])), kbatch);
+  for (const [name, bytes] of kheld) check(await exifr.gps(Buffer.from(bytes)) !== undefined, `${name} kept its details though "Keep details" was unticked mid-batch`);
+
+  await until(B, () => window.__t.prints.size === 10);
+  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 8);
+  check(true, 'the other device sees 10 prints with 8 thumbnails');
 
   // drag photo-0 and the video onto B's screen with the mouse: press on the print, move past
   // A's right edge (B's screen is joined there) and let go
   async function drag(page, name, toX) {   // toX: where to let go, in this page's screen x (beyond its right edge = the joined screen)
     const at = await page.evaluate((name) => {
       const t = window.__t, p = [...t.prints.values()].find((p) => p.name === name), [wx, wy] = t.world(p), me = t.layout.pos[t.id];
+      t.prints.delete(p.pid); t.prints.set(p.pid, p);   // on top, so the press picks this print even where prints overlap
       return { x: wx - me[0] + p.w / 2, y: wy - me[1] + p.h / 2 };
     }, name);
     await page.mouse.move(at.x, at.y); await page.mouse.down();
@@ -68,10 +113,26 @@ try {
   }
   await drag(A, 'photo-0.jpg', 900 + 150);   // the middle of B's screen
   await drag(A, 'clip.mp4', 900 + 150);
+  await drag(A, 'IMG_0001.JPG', 900 + 150);
+  await drag(A, 'IMG_0003.JPG', 900 + 150);
   const before = await B.evaluate(() => window.__t.prints.size);
-  await until(B, () => window.__t.files.size === 2, null, 60000);
-  const got = await B.evaluate(() => Promise.all([...window.__t.files.values()].map(async (f) => [f.name, [...new Uint8Array(await f.arrayBuffer())]])));
-  for (const [name, bytes] of got) check(sha(Buffer.from(bytes)) === sha(files.find((f) => f.name === name).buffer), `${name} arrived byte-identical`);
+  await until(B, () => window.__t.files.size === 4, null, 90000);
+  const got = await B.evaluate(() => Promise.all([...window.__t.files.entries()].map(async ([pid, f]) => {
+    const bmp = await createImageBitmap(f).catch(() => null), shown = bmp && [bmp.width, bmp.height];
+    return [f.name, [...new Uint8Array(await f.arrayBuffer())], window.__t.prints.get(pid).sha, shown];
+  })));
+  const expected = Object.fromEntries(files.map((f) => [f.name, sha(f.buffer)]));   // what a late guest should get
+  for (const [name, bytes, announced, shown] of got) {
+    const buf = Buffer.from(bytes);
+    if (name !== 'IMG_0001.JPG') { check(sha(buf) === expected[name], `${name} arrived byte-identical`); continue; }
+    const meta = (await exifr.parse(buf, { tiff: true, exif: true, gps: true, xmp: true, iptc: true, icc: false })) || {};
+    check(sha(buf) === announced, `${name} passed its fingerprint check`);
+    check(await exifr.gps(buf) === undefined && !meta.Make && !meta.Model && !buf.includes('hdrgm'), `${name} arrived without GPS, camera details or gain map`);
+    check(await exifr.orientation(buf) === 6 && shown?.[0] === 8 && shown?.[1] === 16, `${name} still upright (shown ${shown?.join(' x ')})`);
+    expected[name] = sha(buf);
+  }
+  const keptGot = got.find(([name]) => name === 'IMG_0003.JPG');
+  check(!!keptGot && await exifr.gps(Buffer.from(keptGot[1])) !== undefined, 'IMG_0003.JPG ("Keep details") still has its GPS');
   const path = await A.evaluate(() => { const t = window.__t; return t.peers.path(Object.keys(t.net.peers).find((k) => k !== t.id)); });
   check(RELAY ? path === 'relay (encrypted)' : path === 'direct', `went ${path}`);
 
@@ -103,8 +164,7 @@ try {
   await drag(B, 'photo-0.jpg', 390 + 150);                                          // B drags its copy onto C
   await until(C, () => window.__t.files.size === 1, null, 60000);
   const [cname, cbytes] = await C.evaluate(async () => { const f = [...window.__t.files.values()][0]; return [f.name, [...new Uint8Array(await f.arrayBuffer())]]; });
-  const original = files.find((f) => f.name === cname);   // prints can overlap, so check whichever one was picked up
-  check(!!original && sha(Buffer.from(cbytes)) === sha(original.buffer), `late guest downloaded ${cname} from B byte-identical`);
+  check(!!expected[cname] && sha(Buffer.from(cbytes)) === expected[cname], `late guest downloaded ${cname} from B byte-identical`);
 } catch (e) {
   check(false, e.message.split('\n')[0]);
 } finally {

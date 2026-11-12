@@ -213,7 +213,7 @@ Each of these answers a threat in the [threat model](THREAT-MODEL.md).
 | S4 | The host approves who joins | S | US6 |
 | S5 | Files are labelled by what they really are. Risky files are refused | S | US12. The type comes from the file's contents, not its name. JPEG, PNG, HEIC, WebP, GIF, MP4, MOV and PDF are recognised. Apps and scripts (.exe, .apk, .sh, .bat, .js, .html, .svg) are refused |
 | S6 | Location and device details are removed from JPEG photos before sending unless the sender keeps them | M | US5. Metadata is removed first. The SHA-256 is then taken of the cleaned file. The fingerprint check (C11) still passes |
-| S17 | Location and device details are removed from HEIC, PNG, WebP and video too | S | As S6, for each format. Harder in a browser than JPEG (see ARCHITECTURE.md technical risks) |
+| S17 | Location and device details are removed from HEIC, PNG, WebP and video too | S | As S6, for each format. Harder in a browser than JPEG (see ARCHITECTURE.md technical risks). Checked 12 Nov on a real iPhone: the picker turns HEIC photos into JPEGs that still carry GPS, camera details and the gain map. S6 removes them from those JPEGs. Photos picked as HEIC and videos still need this |
 | S7 | A room holds at most 20 devices | S | Device 21 is told the room is full. Further presences are ignored |
 | S8 | Only this site can use the Supabase project | S | Realtime authorization is on: rooms are private channels that need a token from Supabase's anonymous sign-in. Users create no account. Each sign-in still makes an anonymous user record in Supabase (see OQ3). Usage is monitored in the Supabase dashboard. Whether anonymous sign-in needs a CAPTCHA is OQ7 |
 | S9 | Strangers' images are hidden until tapped. Any device can be blocked | S | US14 |

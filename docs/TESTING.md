@@ -46,7 +46,8 @@ Which level of test proves each requirement. Results are recorded on each requir
 | C10, N3, S1.1–S1.6, S2, S7, S10 | Integration | The attack or malformed message is sent between live devices and must change nothing |
 | S3 | Integration | Matching words. A swapped key makes them differ |
 | C1, C11 | Unit | `tests/check.test.mjs` (exists) |
-| S5, S6, S12 | Unit | New fixtures for file types, JPEG metadata and links (to write) |
+| S6 | Unit, System | `tests/strip.test.mjs`: iPhone- and Android-style JPEG fixtures lose GPS and camera details, stay upright and a JPEG without metadata is unchanged. The two-browser test sends one with and one without "Keep details" (exists) |
+| S5, S12 | Unit | New fixtures for file types and links (to write) |
 | `seal.js`, `layout.js` | Unit | Key derivation, sealing and layout solving (to write) |
 | F2 | System | Progress and error messages appear during a transfer and a failed fingerprint check (to write) |
 | F3 | Acceptance | Save a received photo to the camera roll on an iPhone and an Android phone (manual) |
