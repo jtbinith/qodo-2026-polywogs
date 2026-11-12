@@ -63,9 +63,26 @@ try {
   await A.setInputFiles('#pick', [kept]);
   await A.uncheck('#keep');
   files.push(kept);
-  await until(B, () => window.__t.prints.size === 6);
-  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 4);
-  check(true, 'the other device sees 6 prints with 4 thumbnails');
+
+  // ticking "Keep details" while a batch is still being prepared changes nothing for that batch:
+  // the choice is the one made when the files were picked
+  const batch = ['IMG_0004.JPG', 'IMG_0005.JPG'];
+  await A.evaluate(([bytes, names]) => {
+    const pick = document.getElementById('pick'), dt = new DataTransfer();
+    for (const n of names) dt.items.add(new File([new Uint8Array(bytes)], n, { type: 'image/jpeg' }));
+    pick.files = dt.files;
+    pick.dispatchEvent(new Event('change'));
+    document.getElementById('keep').checked = true;   // ticked for the next pick, while this one is still running
+  }, [[...iphoneJpeg()], batch]);
+  await until(A, (names) => names.every((n) => [...window.__t.prints.values()].some((p) => p.name === n)), batch);
+  await A.uncheck('#keep');
+  const held = await A.evaluate((names) => Promise.all([...window.__t.prints.values()].filter((p) => names.includes(p.name))
+    .map(async (p) => [p.name, [...new Uint8Array(await window.__t.files.get(p.pid).arrayBuffer())]])), batch);
+  for (const [name, bytes] of held) check(await exifr.gps(Buffer.from(bytes)) === undefined, `${name} cleaned though "Keep details" was ticked mid-batch`);
+
+  await until(B, () => window.__t.prints.size === 8);
+  await until(B, () => [...window.__t.prints.values()].filter((p) => p.img).length === 6);
+  check(true, 'the other device sees 8 prints with 6 thumbnails');
 
   // drag photo-0 and the video onto B's screen with the mouse: press on the print, move past
   // A's right edge (B's screen is joined there) and let go
