@@ -180,3 +180,22 @@ test('the caller hears when a device\'s key arrives, but not a bad one', async (
   await settle();
   assert.deepEqual(ready, ['c'], 'a bad key was reported as ready');
 });
+
+// The relay queue is shared by every device. One frame that fails to go out (seal() or
+// signal() throws) must fail only its own send, not every later relay send to everyone.
+test('one relay frame that fails to send doesn\'t block later frames', async () => {
+  const sent = [];
+  const peers = createPeers({ myId: 'a', table: 'T', signal: (to, d) => {
+    if (d.r && to === 'x') throw new Error('room server refused the frame');
+    sent.push([to, d]);
+  } });
+  const frames = (to) => sent.filter(([t, d]) => t === to && d.r).length;
+  await giveKey(peers, 'x'); await giveKey(peers, 'b');
+  const bad = peers.send('x', { t: 'print', pid: '0123456789abcdef' });
+  await settle(); await tick(100);
+  assert.equal(await bad, false, 'the failed frame was reported as sent');
+  const good = peers.send('b', { t: 'print', pid: '0123456789abcdef' });
+  await settle(); await tick(100);
+  assert.equal(frames('b'), 1, 'a later frame to another device never went out');
+  assert.equal(await good, true, 'a later frame to another device was reported as dropped');
+});
