@@ -26,11 +26,11 @@ let failed = false;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failed = true; };
 
 const browser = await chromium.launch();
-async function device(w, h, { at = room, init } = {}) {
+async function device(w, h, { at = room, init, relay = RELAY } = {}) {
   const page = await (await browser.newContext({ viewport: { width: w, height: h } })).newPage();
   page.on('pageerror', (e) => { console.log('page error:', e.message); failed = true; });
   if (init) await page.addInitScript(init);
-  await page.goto(`${BASE}?room=${at}&auto${RELAY ? '&relay' : ''}`);
+  await page.goto(`${BASE}?room=${at}&auto${relay ? '&relay' : ''}`);
   return page;
 }
 const until = (page, fn, arg, timeout = 30000) => page.waitForFunction(fn, arg, { timeout });
@@ -196,7 +196,8 @@ try {
 
   // a device whose key is late: in a fresh room, B holds back its key for 11 s after A's
   // arrives, so A's print to B is dropped at 10 s. When the key comes, A must announce the
-  // print again and B must end up with it (S1.3)
+  // print again and B must end up with it (S1.3). Both run relay-only, even in the direct run:
+  // holding the key doesn't stop a direct link, which could deliver the print without one
   const KEY_LATE = 11000;
   const holdKey = (late) => {   // runs in B's page before the app: wrap the app's signal lane once it exists
     let t, heard = 0; const held = [];
@@ -210,14 +211,14 @@ try {
     } });
   };
   const late = code();
-  const A2 = await device(900, 600, { at: late });
+  const A2 = await device(900, 600, { at: late, relay: true });
   const dropped = [];
   A2.on('console', (m) => { if (m.text().startsWith('dropped message to')) dropped.push(m.text()); });
   await until(A2, () => window.__t && window.__t.net.status === 'live');
   await A2.setInputFiles('#pick', [files[0]]);
   await until(A2, () => window.__t.prints.size === 1);
   const pid = await A2.evaluate(() => [...window.__t.prints.keys()][0]);
-  const B2 = await device(390, 700, { at: late, init: `(${holdKey})(${KEY_LATE})` });
+  const B2 = await device(390, 700, { at: late, relay: true, init: `(${holdKey})(${KEY_LATE})` });
   const b2id = await until(B2, () => window.__t && window.__t.id).then((h) => h.jsonValue());
   await until(B2, () => window.__keySent, null, KEY_LATE + 20000);
   const early = await B2.evaluate((pid) => window.__t.prints.has(pid), pid);
