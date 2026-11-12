@@ -3,7 +3,8 @@
 // must end up with byte-identical files. An iPhone-style JPEG must arrive with its location
 // and camera details removed, still upright, unless "Keep details" is ticked (S6). Also checks a stranger's malformed messages are
 // ignored, that a send to a device that never answers gives up after 10 s without holding up
-// anyone else (S1.3) and that a late guest can still download photos after their owner leaves.
+// anyone else (S1.3), that a print dropped while a device's key was late is announced again
+// once the key comes (S1.3) and that a late guest can still download photos after their owner leaves.
 //
 //   node tests/two-browser.mjs           direct device-to-device path (WebRTC)
 //   node tests/two-browser.mjs --relay   force the end-to-end encrypted relay path
@@ -18,16 +19,18 @@ const RELAY = process.argv.includes('--relay');
 const server = await serve(0);
 const BASE = `http://127.0.0.1:${server.address().port}/index.html`;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const room = [...randomBytes(10)].map((b) => ALPHABET[b & 31]).join('');
+const code = () => [...randomBytes(10)].map((b) => ALPHABET[b & 31]).join('');
+const room = code();
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 let failed = false;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failed = true; };
 
 const browser = await chromium.launch();
-async function device(w, h) {
+async function device(w, h, { at = room, init } = {}) {
   const page = await (await browser.newContext({ viewport: { width: w, height: h } })).newPage();
   page.on('pageerror', (e) => { console.log('page error:', e.message); failed = true; });
-  await page.goto(`${BASE}?room=${room}&auto${RELAY ? '&relay' : ''}`);
+  if (init) await page.addInitScript(init);
+  await page.goto(`${BASE}?room=${at}&auto${RELAY ? '&relay' : ''}`);
   return page;
 }
 const until = (page, fn, arg, timeout = 30000) => page.waitForFunction(fn, arg, { timeout });
@@ -190,6 +193,38 @@ try {
   await until(C, () => window.__t.files.size === 1, null, 60000);
   const [cname, cbytes] = await C.evaluate(async () => { const f = [...window.__t.files.values()][0]; return [f.name, [...new Uint8Array(await f.arrayBuffer())]]; });
   check(!!expected[cname] && sha(Buffer.from(cbytes)) === expected[cname], `late guest downloaded ${cname} from B byte-identical`);
+
+  // a device whose key is late: in a fresh room, B holds back its key for 11 s after A's
+  // arrives, so A's print to B is dropped at 10 s. When the key comes, A must announce the
+  // print again and B must end up with it (S1.3)
+  const KEY_LATE = 11000;
+  const holdKey = (late) => {   // runs in B's page before the app: wrap the app's signal lane once it exists
+    let t, heard = 0; const held = [];
+    Object.defineProperty(window, '__t', { configurable: true, get: () => t, set(v) {
+      t = v; const sig = v.net.signal, on = v.peers.onSignal;
+      v.net.signal = (to, d) => (d?.pub && !window.__keySent ? held.push([to, d]) : sig(to, d));
+      v.peers.onSignal = (from, d) => {
+        if (d?.pub && !heard) { heard = Date.now(); setTimeout(() => { window.__keySent = Date.now(); v.net.signal = sig; held.splice(0).forEach(([to, x]) => sig(to, x)); }, late); }
+        return on(from, d);
+      };
+    } });
+  };
+  const late = code();
+  const A2 = await device(900, 600, { at: late });
+  const dropped = [];
+  A2.on('console', (m) => { if (m.text().startsWith('dropped message to')) dropped.push(m.text()); });
+  await until(A2, () => window.__t && window.__t.net.status === 'live');
+  await A2.setInputFiles('#pick', [files[0]]);
+  await until(A2, () => window.__t.prints.size === 1);
+  const pid = await A2.evaluate(() => [...window.__t.prints.keys()][0]);
+  const B2 = await device(390, 700, { at: late, init: `(${holdKey})(${KEY_LATE})` });
+  const b2id = await until(B2, () => window.__t && window.__t.id).then((h) => h.jsonValue());
+  await until(B2, () => window.__keySent, null, KEY_LATE + 20000);
+  const early = await B2.evaluate((pid) => window.__t.prints.has(pid), pid);
+  check(!early && dropped.some((d) => d.includes(b2id)), `A dropped its print to B while B's key was late (${dropped.find((d) => d.includes(b2id)) || 'nothing dropped'})`);
+  const heard = await until(B2, (pid) => window.__t.prints.has(pid), pid, 20000).then(() => true, () => false);
+  const took = await B2.evaluate(() => ((Date.now() - window.__keySent) / 1000).toFixed(1));
+  check(heard, `A announced the print again once B's key came, and B has it (${took} s after the key)`);
 } catch (e) {
   check(false, e.message.split('\n')[0]);
 } finally {
