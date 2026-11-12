@@ -44,7 +44,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | N2, Q2 | System | Two-browser test in Chromium and WebKit |
 | Q1 | System | Two-browser test as a required GitHub check |
 | C10, N3, S1.1, S1.2, S1.4–S1.6, S2, S7, S10 | Integration | The attack or malformed message is sent between live devices and must change nothing |
-| S1.3 | Unit, System | `tests/peers.test.mjs`: a device that never sends its key or never drains its buffer is given up on after 10 s, a draining or throttled link finishes. The two-browser test asks for a photo from a silent device while two others keep transferring (exists) |
+| S1.3 | Unit, System | `tests/peers.test.mjs`: a device that never sends its key or never drains its buffer is given up on after 10 s, a draining or throttled link finishes, a dropped message is reported so a print can be announced again when a late key arrives. The two-browser test asks for a photo from a silent device while two others keep transferring, and checks a read error isn't blamed on the other device (exists) |
 | S3 | Integration | Matching words. A swapped key makes them differ |
 | C1, C11 | Unit | `tests/check.test.mjs` (exists) |
 | S6 | Unit, System | `tests/strip.test.mjs`: iPhone- and Android-style JPEG fixtures lose GPS and camera details, stay upright and a JPEG without metadata is unchanged. The two-browser test sends one with and one without "Keep details" (exists) |
