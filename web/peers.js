@@ -37,7 +37,7 @@ function waitOn(peer, start) {
 
 export function createPeers({ myId, table, signal, forceRelay = false }) {
   const links = {};   // peer id -> { pc, dc, open, polite, makingOffer, ignoreOffer, pending, key, keyFailed, outbox, inbox }
-  const handlers = new Set();
+  const handlers = new Set(), readyHandlers = new Set();
   const emit = (from, msg, bytes) => handlers.forEach((f) => f(from, msg, bytes));
   const mine = makeKeyPair();
 
@@ -128,26 +128,28 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
   // A peer's key has arrived (or turned out bad): deliver what was waiting for it.
   async function keyArrived(peer, L) {
     const out = L.outbox.splice(0), inb = L.inbox.splice(0);
-    if (!L.key) { out.forEach((o) => o.done()); return; } // bad key: drop, but don't leave senders hanging
+    if (!L.key) { out.forEach((o) => o.done(false)); return; } // bad key: drop, but don't leave senders hanging
     for (const o of out) o.done(enqueue(peer, L, o.buf));  // stops its timer: the shared queue isn't a wait on the device
+    readyHandlers.forEach((f) => f(peer));                 // anything dropped while waiting can be sent again
     for (const r of inb) await openRelayed(peer, L, r);
   }
 
   // One relay queue for the whole page, paced so we don't trip the server's rate limit.
-  // Only frames whose key is ready go in it.
+  // Only frames whose key is ready go in it. Resolves true once the frame is sent.
   let relayTail = Promise.resolve();
   function enqueue(peer, L, buf) {
     relayTail = relayTail.then(async () => {
       signal(peer, { r: b64(await seal(L.key, buf, myId, peer)) });
       await new Promise((r) => setTimeout(r, RELAY_GAP));
     });
-    return relayTail;
+    return relayTail.then(() => true);
   }
+  // Resolves true if the frame was sent, false if it was dropped.
   function relay(peer, buf) {
     const L = link(peer);
-    if (L.keyFailed) return Promise.resolve();
+    if (L.keyFailed) return Promise.resolve(false);
     if (L.key) return enqueue(peer, L, buf);
-    if (L.outbox.length >= HOLD) return Promise.resolve();
+    if (L.outbox.length >= HOLD) return Promise.resolve(false);
     return waitOn(peer, (done) => {
       const o = { buf, done };
       L.outbox.push(o);
@@ -160,7 +162,9 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     if (L.open && L.dc.readyState === 'open') {
       if (L.dc.bufferedAmount > HIGH_WATER) await drained(peer, L.dc);
       L.dc.send(buf);
-    } else await relay(peer, buf);
+      return true;
+    }
+    return relay(peer, buf);
   }
 
   // Wait for a full direct buffer to drain. A slow link that keeps draining restarts the timer.
@@ -174,8 +178,9 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     });
   }
 
-  // A short message that can't be sent in time is dropped. Every caller can ask again.
-  const send = (peer, msg) => sendFrame(peer, frame(msg)).catch((e) => console.warn('dropped message to', peer, e.message));
+  // A short message that can't be sent in time is dropped. Resolves true if it was sent and
+  // false if it was dropped, so the caller can send it again (see onReady).
+  const send = (peer, msg) => sendFrame(peer, frame(msg)).catch((e) => { console.warn('dropped message to', peer, e.message); return false; });
 
   // Stream a File/Blob in pieces without loading it all into memory. `only` resends
   // just the listed pieces (after the receiver reports gaps). Rejects with SendTimeout if the
@@ -194,7 +199,7 @@ export function createPeers({ myId, table, signal, forceRelay = false }) {
     onSignal, send, sendFile,
     connect: (peer) => link(peer),
     on: (f) => handlers.add(f),
-    onReady: () => {},   // stub: not written yet
+    onReady: (f) => readyHandlers.add(f),   // f(peer) when a peer's key arrives
     path: (peer) => { const L = links[peer]; return !L ? 'none' : L.open ? 'direct' : L.key ? 'relay (encrypted)' : 'keys…'; },
     state: (peer) => links[peer]?.pc.connectionState || 'none',
   };

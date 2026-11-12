@@ -147,9 +147,10 @@ const broadcast = (f) => others().forEach(f);
 const announced = new Map(); // pid -> devices we've announced it to
 const sentTo = (pid) => announced.get(pid) || announced.set(pid, new Set()).get(pid);
 function announce(peer, p) {
-  sentTo(p.pid).add(peer);
+  sentTo(p.pid).add(peer);   // counted while it's on the way, so it isn't announced twice
   const { img, thumb, lastSource, ...meta } = p;
-  peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 });
+  // dropped (the device stopped answering): forget it, so the catch-up announces it again
+  peers.send(peer, { t: 'print', ...meta, thumbSize: thumb?.length || 0 }).then((sent) => { if (!sent) sentTo(p.pid).delete(peer); });
   if (thumb) peers.sendFile(peer, 'thumb:' + p.pid, new Blob([thumb])).catch(() => {});   // the receiver asks again
 }
 
@@ -320,16 +321,21 @@ function start(room) {
     onMessage(from, m, bytes);
   });
   const known = new Set();
-  net.on((ev) => {
-    if (ev !== 'peers') return;
-    for (const k of others()) if (!known.has(k)) { known.add(k); peers.connect(k); } // swap keys, try a direct link
-    // Catch everyone up. The owner announces its prints; once the owner has left, anyone
-    // still holding a print announces it. Re-checked on every change in who's here, because
-    // a device that closes can take a while to drop out of the room.
+  // Catch everyone up. The owner announces its prints; once the owner has left, anyone
+  // still holding a print announces it. Re-checked on every change in who's here, because
+  // a device that closes can take a while to drop out of the room, and whenever a device's
+  // key arrives, because a print to it may have been dropped while we waited (S1.3).
+  const catchUp = () => {
     for (const p of prints.values()) {
       if (!(p.owner === id || (!net.peers[p.owner] && files.has(p.pid)))) continue;
       for (const k of others()) if (!sentTo(p.pid).has(k)) announce(k, p);
     }
+  };
+  peers.onReady(catchUp);
+  net.on((ev) => {
+    if (ev !== 'peers') return;
+    for (const k of others()) if (!known.has(k)) { known.add(k); peers.connect(k); } // swap keys, try a direct link
+    catchUp();
   });
   net.on((ev) => {
     if (ev === 'joined') toast('Screens joined ✨');
