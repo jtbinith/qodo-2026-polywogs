@@ -18,7 +18,7 @@ Every device in a room is a stranger: anyone with the room code can send anythin
 | `docs/` | Requirements, architecture, threat model and test plan |
 
 ## Docs
-Requirements: `docs/PRD.md`. Design and message types: `docs/ARCHITECTURE.md`. Threats: `docs/THREAT-MODEL.md`. Tests: `docs/TESTING.md`. Every ticket cites its PRD ID (for example S6) and every PR names the IDs it covers.
+Requirements: `docs/PRD.md`. Design and message types: `docs/ARCHITECTURE.md`. Threats: `docs/THREAT-MODEL.md`. Tests: `docs/TESTING.md`. Every ticket cites its PRD ID (for example S6) and every PR names the IDs it covers. Tickets are worked with the `work-ticket` skill (`.claude/skills/work-ticket/`).
 
 ## Setup
 ```sh

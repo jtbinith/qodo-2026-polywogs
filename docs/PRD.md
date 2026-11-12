@@ -241,6 +241,7 @@ Each of these answers a threat in the [threat model](THREAT-MODEL.md).
 | Q1 | The two-browser test runs on every pull request | M | A required check in GitHub Actions blocks merging when it fails |
 | Q2 | Safari is tested as well as Chrome | S | The two-browser test also runs in WebKit |
 | Q3 | Review standards in Qodo do not overlap | S | The two fingerprint standards are merged into one covering "verify before keeping or announcing" |
+| Q4 | Every ticket is worked the same way | M | Each PR links its ticket, lists every acceptance criterion and the edge case with results and includes the red and green test output. Tickets are worked with the `work-ticket` skill |
 
 ## 8. Security and privacy
 The full threat model is in [THREAT-MODEL.md](THREAT-MODEL.md). It uses STRIDE and assumes every other device in a room may be hostile.
