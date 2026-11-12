@@ -58,9 +58,9 @@ Builders follow these rules. Reviewers flag any change that breaks one, even if 
 **6. Details stay out unless we can name them** (the Allowlist Rule)
 - **Rule:** metadata leaves the device only as fields we have named and chosen to keep. Everything else is dropped. Today that is JFIF's and Adobe's fixed fields, the ICC colour profile and a rewritten Orientation. A file sent without being cleaned (another format or a JPEG that can't be read) shows the sender "details not removed". A privacy choice the sender makes (such as Keep details) is read once, when the action starts. Filenames are not covered yet (OQ5).
 - **Where:** `web/strip.js`, the picker in `web/index.html` and anything that decides what leaves the device.
-- **Why:** a photo can reveal where someone lives. On Day 3 details leaked in two ways with one cause, copying by default: whole segments were kept because of their marker. Files that weren't JPEGs went without a warning. Both were spotted before review and left in on purpose. Qodo flagged both.
+- **Why:** a photo can reveal where someone lives. On Day 3 Qodo found details leaking two ways with one cause, copying by default: segments kept because of their marker. Other formats sent without a warning.
 - **Breaks it:** keeping a segment because of its marker instead of its fields. `return { file }` with no warning for a format we don't clean. A privacy setting read after an `await`, which can change between files of one batch (#26: Keep details read per file).
-- **Checked by:** `tests/strip.test.mjs` puts private bytes inside kept segments and sends each format the picker accepts. `npm run test:browsers` changes Keep details mid-batch in both directions. In review: any segment kept because of its marker, any `return { file }` without a warning and any privacy setting read after an `await`.
+- **Checked by:** `tests/strip.test.mjs` puts private bytes inside kept segments and checks JPEG, HEIC, PNG, WebP, MOV and MP4 fixtures. `npm run test:browsers` changes Keep details mid-batch in both directions. In review: any segment kept because of its marker, any `return { file }` without a warning and any privacy setting read after an `await`.
 
 ### Network reliability
 
