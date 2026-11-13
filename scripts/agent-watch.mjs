@@ -31,7 +31,8 @@ const LIMITS = {
 const REPO = 'jtbinith/qodo-hack-2026', OWNER = 'jtbinith', QODO = 'qodo-code-review[bot]';
 const MAIN = join(homedir(), 'qodo-hack-2026');
 const HOME = join(homedir(), '.local/state/qodo-agent'), WORK = join(homedir(), 'qodo-agent');
-const L = { ready: 'ready-for-agent', working: 'agent-working', done: 'agent-done', help: 'agent-needs-help' };
+const L = { ready: 'ready-for-agent', working: 'agent-working', done: 'agent-done', help: 'agent-needs-help',
+  blocked: 'agent-refused: blocked', notOwner: 'agent-refused: not owner\'s ticket' };
 // paths the agent must never change: the factory itself
 const GUARDED = [/^package(-lock)?\.json$/, /^scripts\//, /^\.claude\//, /^\.github\//, /^AGENTS\.md$/, /^\.gitignore$/, /^node_modules/];
 mkdirSync(join(HOME, 'logs'), { recursive: true }); mkdirSync(WORK, { recursive: true });
@@ -60,7 +61,10 @@ process.on('exit', () => { try { closeSync(lockFd); unlinkSync(LOCK); } catch {}
 
 // ---- GitHub, read and written only by the script ----
 const issue = (n) => ghJson('api', `repos/${REPO}/issues/${n}`);
-const issueComments = (n) => ghJson('api', `repos/${REPO}/issues/${n}/comments?per_page=100`);
+function issueComments(n) {   // every page: anyone can comment on a public repo, so there may be more than 100
+  const all = [];
+  for (let page = 1; ; page++) { const p = ghJson('api', `repos/${REPO}/issues/${n}/comments?per_page=100&page=${page}`); all.push(...p); if (p.length < 100) return all; }
+}
 function labelledByOwner(n) {
   let events = [];   // every page: the label that counts is the newest one
   for (let page = 1; ; page++) { const p = ghJson('api', `repos/${REPO}/issues/${n}/events?per_page=100&page=${page}`); events.push(...p); if (p.length < 100) break; }
@@ -123,6 +127,8 @@ const ALLOW = ['Skill',   // Read, Glob, Grep and Edit are allowed only inside t
   'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git commit:*)'];
 const DENY = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git reset:*)', 'Bash(git remote:*)', 'Bash(gh:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(ssh:*)', 'WebFetch', 'WebSearch'];
 class Stop extends Error {}
+// refused before any agent starts: the label says why, the comment says the detail
+class Refuse extends Error { constructor(label, msg) { super(msg); this.label = label; } }
 function agent(n, s, what, prompt) {
   const log = join(HOME, 'logs', `${n}-${s.runs + 1}-${what}.log`), before = footprint(s), from = head(s);
   event(n, `agent run ${s.runs + 1} (${what}) started`);
@@ -208,7 +214,8 @@ function proveRed(n, s, base) {
 
 function stop(n, s, label, why) {
   if (s) { s.phase = label === L.done ? 'done' : 'help'; save(n, s); }
-  setLabels(n, [label], [L.working]);
+  const has = issue(n).labels.map((l) => l.name);
+  setLabels(n, [label], [L.working, L.ready].filter((l) => has.includes(l)));
   const report = s ? agentFile(s, 'report.md') : '';
   comment(n, `**Factory run ${label === L.done ? 'finished' : 'stopped and needs you'}.** ${why}\n\n` +
     (s ? `Agent runs: ${s.runs} · review rounds: ${s.round}/${LIMITS.reviewRounds} · comment rounds: ${s.commentRounds}/${LIMITS.commentRounds}` + (s.pr ? ` · PR #${s.pr}` : '') : '') +
@@ -296,15 +303,15 @@ try {
     if (openPrs.length) { event(n, `waiting: PR #${openPrs[0].number} is still open`); break; }
     current = { n, s: null };
     const t = issue(n);
-    if (t.user.login !== OWNER) throw new Stop(`#${n} was written by ${t.user.login}, not ${OWNER}. The factory only works the owner's tickets.`);
+    if (t.user.login !== OWNER) throw new Refuse(L.notOwner, `#${n} was written by ${t.user.login}, not ${OWNER}. The factory only works the owner's tickets.`);
     const blockers = ghJson('api', `repos/${REPO}/issues/${n}/dependencies/blocked_by`).filter((b) => b.state === 'open');
-    if (blockers.length) throw new Stop(`#${n} is blocked by ${blockers.map((b) => '#' + b.number).join(', ')}.`);
+    if (blockers.length) throw new Refuse(L.blocked, `#${n} is blocked by ${blockers.map((b) => '#' + b.number).join(', ')}, which ${blockers.length > 1 ? 'are' : 'is'} still open. Nothing was started.`);
     const slug = title.toLowerCase().replace(/^[^·]*·\s*/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     let branch = `agent/${n}-${slug}`;
     for (let k = 2; sh('git', ['ls-remote', '--heads', 'origin', branch], { cwd: MAIN }); k++) branch = `agent/${n}-${slug}-${k}`;   // a re-run gets a new branch
     const s = { n, branch, dir: join(WORK, String(n)), runs: 0, round: 0, commentRounds: 0, phase: 'work', startedAt: now() };
     current.s = s;
-    setLabels(n, [L.working], [L.ready, L.help, L.done].filter((l) => t.labels.some((x) => x.name === l))); moveCard(n, 'In Progress');
+    setLabels(n, [L.working], [L.ready, L.help, L.done, L.blocked, L.notOwner].filter((l) => t.labels.some((x) => x.name === l))); moveCard(n, 'In Progress');
     comment(n, `Picked up by the factory at ${s.startedAt}. Branch \`${s.branch}\`. Limits: ${LIMITS.testAttempts} test attempts, ${LIMITS.reviewRounds} Qodo rounds, ${LIMITS.commentRounds} \`/agent\` rounds.`);
     event(n, `picked up (${title})`); notify(`Picked up #${n}`);
     sh('git', ['fetch', 'origin', 'main'], { cwd: MAIN });
@@ -320,6 +327,15 @@ try {
   }
 } catch (e) {
   if (!current) throw e;
+  if (e instanceof Refuse) {
+    try {
+      const has = issue(current.n).labels.map((l) => l.name);
+      setLabels(current.n, [e.label], [L.ready, L.help, L.done].filter((l) => has.includes(l)));
+      comment(current.n, `**Factory refused this ticket before starting.** ${e.message}\n\nRemove the reason and label it \`${L.ready}\` again to retry.`);
+      event(current.n, `refused (${e.label}): ${e.message}`); notify(`#${current.n}: refused. ${e.message}`);
+    } catch (e2) { event(current.n, `couldn't report the refusal: ${e2.message.split('\n')[0]}`); }
+    process.exit(0);
+  }
   const why = e instanceof Stop ? e.message : `The runner crashed: ${e.message.split('\n').slice(0, 6).join('\n')}`;
   try { stop(current.n, current.s, L.help, why); } catch (e2) { event(current.n, `couldn't report the stop: ${e2.message.split('\n')[0]}`); notify(`#${current.n}: runner failed`); }
 }
