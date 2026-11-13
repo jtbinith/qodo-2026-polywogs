@@ -3,32 +3,64 @@
 
 // The names of the tests a diff adds: test('…') in unit files, and the message of check(…, '…') in
 // the two-browser test. A check() call can wrap across lines and its condition can hold strings,
-// so the message is its last argument, found by reading the call to its closing bracket.
-// Template literals count up to their first ${…}.
+// regular expressions and comments, so the message is its last argument, found by reading the call
+// to its closing bracket. Each hunk is read on its own, so a call can't be closed by an unrelated
+// edit. Template literals count up to their first ${…}.
 export function testNames(diff) {
-  const added = diff.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1));
-  const text = added.join('\n'), names = new Set();
-  for (const m of text.matchAll(/\btest\(\s*(['"`])((?:(?!\1)[^\n])+?)\1/g)) names.add(m[2]);
-  for (const m of text.matchAll(/\bcheck\(/g)) {
-    const last = lastArgument(text, m.index + m[0].length);
-    const q = last && /^(['"`])/.exec(last);
-    if (q) names.add(last.slice(1).split(q[1])[0]);
+  const names = new Set();
+  for (const text of hunks(diff)) {
+    for (const m of text.matchAll(/\btest\(\s*(['"`])((?:(?!\1)[^\n])+?)\1/g)) names.add(m[2]);
+    for (const m of text.matchAll(/(?<![\w.$])check\(/g)) {
+      const last = lastArgument(text, m.index + m[0].length);
+      const q = last && /^(['"`])/.exec(last);
+      if (q) names.add(last.slice(1).split(q[1])[0]);
+    }
   }
   return [...names].map((x) => x.split('${')[0].split('\\')[0].trim()).filter((x) => x.length >= 8);
 }
-// the text of the last top-level argument of a call whose arguments start at `from`
+// the added lines of each hunk, joined (a hunk starts at "@@" or a new file)
+function hunks(diff) {
+  const out = []; let cur = [];
+  for (const l of diff.split('\n')) {
+    if (l.startsWith('@@') || l.startsWith('diff --git')) { if (cur.length) out.push(cur.join('\n')); cur = []; }
+    else if (l.startsWith('+') && !l.startsWith('+++')) cur.push(l.slice(1));
+  }
+  if (cur.length) out.push(cur.join('\n'));
+  return out;
+}
+// the text of the last top-level argument of a call whose arguments start at `from`. Skips strings,
+// comments and regular-expression literals, so a bracket or comma inside them doesn't count.
 function lastArgument(text, from) {
-  let depth = 1, quote = null, start = from;
+  let depth = 1, start = from, prev = '(';
   for (let i = from; i < text.length; i++) {
     const c = text[i];
-    if (quote) { if (c === '\\') i++; else if (c === quote) quote = null; continue; }
-    if (c === "'" || c === '"' || c === '`') quote = c;
-    else if ('([{'.includes(c)) depth++;
-    else if (')]}'.includes(c)) { if (--depth === 0) return text.slice(start, i).trim(); }
+    if (c === "'" || c === '"' || c === '`') { i = skipString(text, i); prev = c; continue; }
+    if (c === '/' && text[i + 1] === '/') { i = text.indexOf('\n', i); if (i < 0) return null; continue; }
+    if (c === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i + 2) + 1; if (i <= 0) return null; continue; }
+    if (c === '/' && /[(,=:[!&|?{};]/.test(prev)) { i = skipRegex(text, i); prev = '/'; continue; }
+    if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) { if (--depth === 0) return stripComments(text.slice(start, i)).trim(); }
     else if (c === ',' && depth === 1) start = i + 1;
+    if (!/\s/.test(c)) prev = c;
   }
   return null;
 }
+function skipString(text, i) {
+  const q = text[i];
+  for (i++; i < text.length; i++) { if (text[i] === '\\') i++; else if (text[i] === q) return i; }
+  return text.length;
+}
+function skipRegex(text, i) {
+  let inClass = false;
+  for (i++; i < text.length && text[i] !== '\n'; i++) {
+    if (text[i] === '\\') i++;
+    else if (text[i] === '[') inClass = true;
+    else if (text[i] === ']') inClass = false;
+    else if (text[i] === '/' && !inClass) return i;
+  }
+  return i;
+}
+const stripComments = (t) => t.replace(/^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)\s*/g, '');
 
 // Failures of the named tests that are assertions, not crashes: a unit test's ✖ block must hold an
 // AssertionError. A two-browser FAIL line comes from check(), which is an assertion by construction.
