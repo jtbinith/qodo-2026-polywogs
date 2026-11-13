@@ -260,7 +260,7 @@ function checkAndPush(n, s, why) {
   write(`push ${head(s).slice(0, 7)} to ${s.branch}`, () => sh('git', ['push', '-u', 'origin', `HEAD:refs/heads/${s.branch}`], { cwd: s.dir }));
   const pushed = head(s);
   const proof = `**Red → green, checked by the runner** (not the agent) for ${s.head ? s.head.slice(0, 7) : 'main'}..${pushed.slice(0, 7)}:\n${red.join('\n')}\n- \`${pushed.slice(0, 7)}\` (head): \`npm test\` **passes**, direct and relay.`;
-  s.head = pushed; s.pushedAt = Date.now(); s.proofs = [...(s.proofs || []), proof];
+  s.head = pushed; s.pushedAt = s.waitFrom = Date.now(); s.proofs = [...(s.proofs || []), proof];
   if (!s.pr) {
     writeFileSync(join(HOME, `${n}-pr-body.md`), prBody(n, s));
     const url = write(`open a PR from ${s.branch}`, () => gh('pr', 'create', '-R', REPO, '--head', s.branch, '--base', 'main', '--title', agentFile(s, 'pr-title.txt').trim() || `Ticket #${n}`, '--body-file', join(HOME, `${n}-pr-body.md`)), 'https://github.com/x/pull/0');
@@ -323,7 +323,7 @@ function continueRun(n, s) {
       event(n, `owner asked on PR #${s.pr}: ${asks.map((a) => a.body.slice(7, 80)).join(' | ')}`);
       if (!told.length) {   // only /agent retry: the runner was wrong, so re-check without an agent run
         if (retryPlan(head(s), s.head) === 'push') checkAndPush(n, s, 'owner retry');
-        else { s.pushedAt = Date.now(); save(n, s); event(n, `owner retry: nothing new to push, waiting for Qodo's review of ${s.head.slice(0, 7)} again`); }
+        else { s.waitFrom = Date.now(); save(n, s); event(n, `owner retry: nothing new to push, waiting for Qodo's review of ${s.head.slice(0, 7)} again`); }   // pushedAt stays: it times Qodo's review
         continue;
       }
       // instructions go to the agent. A retry alongside them is covered by the checks that follow.
@@ -335,7 +335,7 @@ function continueRun(n, s) {
         throw new Stop(`The agent made no change for your /agent request. Its reasons are in the report below. Comment \`/agent retry\` on its own on PR #${s.pr} to re-run the checks.`);
       checkAndPush(n, s, 'owner comment');
     } else if (!q || q.reviewed !== s.head) {
-      if ((Date.now() - s.pushedAt) / 60000 > LIMITS.reviewWaitMin) throw new Stop(`Qodo hasn't reviewed ${s.head.slice(0, 7)} after ${LIMITS.reviewWaitMin} min.`);
+      if ((Date.now() - (s.waitFrom || s.pushedAt)) / 60000 > LIMITS.reviewWaitMin) throw new Stop(`Qodo hasn't reviewed ${s.head.slice(0, 7)} after ${LIMITS.reviewWaitMin} min.`);
       if (DRY) { console.log(`DRY RUN would wait for Qodo's review of ${s.head.slice(0, 7)} (reviewed so far: ${q?.reviewed?.slice(0, 7) ?? 'none'})`); process.exit(0); }
       sleep(LIMITS.reviewPollSec * 1000);
     } else if (!q.open.length) {
