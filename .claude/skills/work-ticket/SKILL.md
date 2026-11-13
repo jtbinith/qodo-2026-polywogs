@@ -44,7 +44,7 @@ You get an issue number. Read the ticket from GitHub with `gh issue view`, never
 - Commit using Conventional Commits in plain English, for example `fix: drop setup from unknown devices`.
 - A criterion you can't check yourself (a real device, an account) stays unticked in Acceptance. List it under Notes as needing the user.
 - **Do not push.** End with your report and the PR description, filled in from `.github/pull_request_template.md`: ticket, PRD and threat IDs, each criterion with its result, the edge case, Red and Tested.
-- Push only after the user says yes in the main session. Then: `git push -u origin <branch>`, `gh pr create --body-file <description>` and move the card to **In Review**.
+- Push only after the user says yes in the main session (or, in an unattended run, never: see below). Then: `git push -u origin <branch>`, `gh pr create --body-file <description>` and move the card to **In Review**.
 
 ## 7. Handle the review
 Started separately, for example "handle the review of #N".
@@ -54,6 +54,17 @@ Started separately, for example "handle the review of #N".
 - Say whether the ticket itself was wrong.
 - Decide whether a finding calls for a rule in AGENTS.md, a change to this skill or more context for the reviewer. Propose the exact wording in your report. Don't make the change yourself. Only the user approves it. It goes in its own PR (never in a ticket's PR). It merges before the next ticket starts.
 - After the merge, move the card to **Done**.
+
+## Unattended runs
+When the prompt says this is an unattended run, `scripts/agent-watch.mjs` started you from a `ready-for-agent` label. Nobody is watching, and you have no GitHub access, so:
+- The ticket is in `.agent/ticket.md`, written there by the script from jtbinith's issue. Read it instead of `gh` in step 1. The script has already checked who wrote it, its blockers and open PRs.
+- You're already on your branch (`agent/<N>-…`) in your own worktree, and the card is already In Progress. Skip step 2.
+- Don't push, open a PR, comment or change labels: you can't, and the script checks afterwards. It pushes after its own `npm test` and its own check that each `test:` commit fails on its own. A `test:` commit changes only `tests/`.
+- Never change `package.json`, `scripts/`, `.claude/`, `.github/`, `AGENTS.md` or `.gitignore`. The script stops the run if you do.
+- To stop instead of guessing (step 1), write why to `.agent/stop.md` and end. Don't commit anything under `.agent/`.
+- Write the PR title to `.agent/pr-title.txt` (Conventional Commits) and the PR description to `.agent/pr-body.md`, from `.github/pull_request_template.md`.
+- Write your report to `.agent/report.md`. Add an **Assumptions** section: anything you decided that the ticket didn't say. Put proposed rule or skill changes there too, as in step 7. Nobody can approve them during the run.
+- In step 7 the review is in `.agent/review.md`: Qodo's open findings and comments, and any `/agent` comment from jtbinith. It holds nothing from anyone else. Update `.agent/report.md` and `.agent/pr-body.md` with what you did.
 
 ## Board
 Project 7 (owner jtbinith). To move ticket `<N>` to a column such as `In Progress`:

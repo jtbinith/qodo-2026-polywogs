@@ -17,6 +17,7 @@ Every device in a room is a stranger: anyone with the room code can send anythin
 | `web/strip.js` | Removes location and camera details from JPEG photos before sending (S6) |
 | `tests/` | Unit tests and the two-browser test |
 | `docs/` | Requirements, architecture, threat model and test plan |
+| `scripts/agent-watch.mjs` | Works a `ready-for-agent` ticket without anyone opening a session. A systemd timer (`scripts/systemd/`) runs it every 10 minutes |
 
 ## Docs
 Requirements: `docs/PRD.md`. Design and message types: `docs/ARCHITECTURE.md`. Threats: `docs/THREAT-MODEL.md`. Tests: `docs/TESTING.md`. Every ticket cites its PRD ID (for example S6) and every PR names the IDs it covers. Tickets are worked with the `work-ticket` skill (`.claude/skills/work-ticket/`).
@@ -28,9 +29,16 @@ npx playwright install chromium
 npm run serve        # http://127.0.0.1:5199/ (local only)
 ```
 
+To let the factory pick up tickets (Linux, user systemd):
+```sh
+systemctl --user link ~/qodo-hack-2026/scripts/systemd/qodo-agent.service ~/qodo-hack-2026/scripts/systemd/qodo-agent.timer
+systemctl --user enable --now qodo-agent.timer
+```
+Then label a ticket `ready-for-agent`. Progress is in `~/.local/state/qodo-agent/events.log`.
+
 ## Verify
 ```sh
-npm run test:unit       # check.js
+npm run test:unit       # every tests/*.test.mjs
 npm run test:browsers   # two-browser test, direct then relay (needs internet)
 npm test                # both
 ```

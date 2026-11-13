@@ -5,7 +5,7 @@
   "description": "Share photos between any devices in the same room, in the browser.",
   "scripts": {
     "serve": "node tests/serve.mjs",
-    "test:unit": "node --test tests/check.test.mjs tests/thumb.test.mjs tests/strip.test.mjs tests/peers.test.mjs",
+    "test:unit": "node --test tests/*.test.mjs",
     "test:browsers": "node tests/two-browser.mjs && node tests/two-browser.mjs --relay",
     "test": "npm run test:unit && npm run test:browsers"
   },

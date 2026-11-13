@@ -1,0 +1,16 @@
+[Unit]
+Description=Qodo factory: one step of the ticket loop (scripts/agent-watch.mjs)
+
+[Service]
+Type=oneshot
+# a run waits for Qodo and the agent inside one start. The worst legitimate run is about 17 h
+# (7 pushes, each up to 2 agent runs of 45 min plus tests), so only a hang reaches 24 h. If it's
+# killed, the next tick finds the ticket mid-run and stops it with agent-needs-help.
+TimeoutStartSec=24h
+WorkingDirectory=%h/qodo-hack-2026
+# node and claude live under the home directory, not in systemd's default PATH
+Environment=PATH=%h/.nvm/versions/node/v25.2.1/bin:%h/.toolbox/bin:/usr/local/bin:/usr/bin:/bin
+# run the merged copy from origin/main, not whatever branch the working checkout is on
+ExecStartPre=/usr/bin/git -C %h/qodo-hack-2026 fetch -q origin main
+ExecStartPre=/bin/sh -c 'mkdir -p %h/.local/state/qodo-agent && git -C %h/qodo-hack-2026 show origin/main:scripts/agent-watch.mjs > %h/.local/state/qodo-agent/agent-watch.mjs'
+ExecStart=%h/.nvm/versions/node/v25.2.1/bin/node %h/.local/state/qodo-agent/agent-watch.mjs
