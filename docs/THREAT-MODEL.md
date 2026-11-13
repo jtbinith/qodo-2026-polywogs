@@ -56,6 +56,9 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-S3 | Swap encryption keys | Replace each person's public key during setup | A3, A5 | L | H | | S3 |
 | T-S4 | Imitate the site | Host a lookalike at a similar address | A5 | L | H | | OQ6 |
 | T-S5 | Take over as time keeper when the host leaves | Claim the role during the hand-over | A1 | M | M | | OQ8 |
+| T-S6 | Pass as someone else by name | Pick a name that looks like a friend's: different case, full-width letters, accents, a letter from another script, invisible characters or a text-direction override | A1 | H | M | Names are drawn on a canvas, so nothing runs (T-E1) | S19 (name key, `validName`), S2 (colour and icon from the key) |
+| T-S7 | Join onto someone's screen uninvited | Tap a matching join tab at the same moment as the real person. Or place a tile next to theirs in the mini-map | A1 | M | M | | C15 (who joined and on which side, with Undo), C16 (the other device must accept) |
+| T-S8 | Pose as a device someone has seen before | Join with a remembered device's name from a different device | A1 | M | M | | S20 ("new device" for a known name on an unknown key) |
 
 ### 4.2 Tampering
 | ID | Threat | Attack | By | L | I | In place | Planned |
@@ -64,11 +67,12 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-T2 | Crash or confuse a device | Send malformed messages | A1 | H | M | A check for every message type (C10) | N3 tests every type |
 | T-T3 | Replay old relayed messages | Resend a captured sealed message | A3 | L | M | | OQ2 |
 | T-T4 | Move other people's prints | Send moves for prints they don't own | A1 | M | L | Moves are validated. Allowed by design | S9 blocking |
+| T-T5 | Slip bad pieces into a spread file | Once pieces can come from any holder, send garbage pieces or claim to hold a file | A1 | M | M | Today pieces are only accepted from one device and the whole file is checked (C11) | R1 (a hash per piece), R2 (strikes) |
 
 ### 4.3 Repudiation
 | ID | Threat | Attack | By | L | I | In place | Planned |
 |---|---|---|:---:|:---:|:---:|---|---|
-| T-R1 | Share something abusive and deny it | There are no accounts and device names are random | A1 | M | M | Accepted for privacy | S4, S9 |
+| T-R1 | Share something abusive and deny it | There are no accounts and names are chosen by each person | A1 | M | M | Accepted for privacy | S4, S9. S2 ties each print to one device's key and S20 lets people recognise a device they've seen before |
 
 ### 4.4 Information disclosure
 | ID | Threat | Attack | By | L | I | In place | Planned |
@@ -84,6 +88,7 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-I9 | Learn from filenames | Read names such as "passport-scan.pdf" before anything downloads | A1 | M | M | | OQ5 |
 | T-I10 | Server learns who talks to whom | Observe setup messages, names and screen sizes | A3 | H | L | Accepted. Listed as "allowed in the clear" in AGENTS.md. No content or keys | |
 | T-I11 | Room links leak | Codes in the address bar end up in browser history, screenshots and shared screens | A1, A6 | M | M | Codes are unguessable (C1) | S11, S16, S4 |
+| T-I12 | Recognise someone across rooms | A remembered signing key is the same in every room, so other people's devices can tell it's the same person | A1 | M | L | | S20 is off by default, is the person's choice and has Forget |
 
 ### 4.5 Denial of service
 | ID | Threat | Attack | By | L | I | In place | Planned |
@@ -97,6 +102,7 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-D7 | Run a phone out of memory | Send several very large files at once | A1 | M | M | 200 MB per file (C14) | S1.2 |
 | T-D8 | Image bomb | Send a small thumbnail with enormous dimensions that uses gigabytes of memory while it decodes | A1 | M | M | Full files are never decoded on arrival. A thumbnail is decoded only if its JPEG header says it is at most 400 × 400 and nothing follows its end marker, where a gain map could hide (S14). Otherwise the print shows a plain card | |
 | T-D9 | The room stops working if the host's key is lost | The host's page reloads or closes. Shared links no longer match the time keeper. An attacker could also try to force this | — | M | H | | Host key kept between reloads (ARCHITECTURE.md Keys). A new link if it is lost |
+| T-D10 | Push large files onto joined screens | Drop huge files into a joined space or share them with everyone. Every device then downloads them by itself and uses up its data and memory | A1 | M | M | | F11 and F12 only fetch by themselves from the joined group or a deliberate share and only up to 20 MB (OQ9) |
 
 ### 4.6 Elevation of privilege
 | ID | Threat | Attack | By | L | I | In place | Planned |
@@ -121,3 +127,5 @@ Threats rated High for both likelihood and impact are fixed first: T-S1 (S2) and
 | MUC6 | Get someone to open an app disguised as a photo | T-E2 | S5 | Automatic (to write): a renamed .exe is refused |
 | MUC7 | Inject script through a shared link or text | T-E1 | S12 | Automatic (to write): a link containing script runs nothing |
 | MUC8 | Trick someone into clicking inside a hidden frame | T-E5 | S15 | Manual (to write): load the site in a frame on another page |
+| MUC9 | Pass as a friend by using their name | T-S6, T-S8 | S2, S19, S20 | Automatic (to write): "SAM", "Ｓａｍ", "Ѕam" (Cyrillic) and "Sam" with a zero-width space are refused while "Sam" is in the room |
+| MUC10 | Join onto someone's screen without them wanting it | T-S7 | C15, C16 | Automatic (to write): a third device's mini-map request isn't joined until it is accepted. Undo splits a tab join |
