@@ -101,7 +101,7 @@ Every message from another device is checked in `web/check.js` (or `net.js` for 
 | **Used for** | Each pair of devices derives one AES-256-GCM key with HKDF-SHA256 (salt: `'phototable:'` + the room code, a leftover from the project's old name; info: both device ids, sorted). Every relayed frame gets a fresh random IV and is bound to sender and receiver as associated data |
 | **Lives** | In memory for as long as the page is open. Never stored. Reloading makes new keys. Planned: the host's key pair is stored in IndexedDB as a non-exportable key until the room expires (S11). A reload then keeps the same fingerprint. Other devices still make new keys on reload |
 | **Accepted** | The first key from each device. Later keys are ignored. Verifying keys with four words is planned (S3), as an optional "Check this device" step |
-| **Tied to the id (planned, S2, #24)** | A device's id is the first 128 bits of the SHA-256 of its public key, in base64url. A key that doesn't hash to its id is dropped, so nobody can claim another device's id |
+| **Tied to the id (planned, S2, #24)** | A device's id is the first 128 bits of the SHA-256 of its two public keys (encryption then signing, each in raw form), in base64url. Both keys are announced together. Keys that don't hash to their id are dropped, so nobody can claim another device's id or attach their own signing key to it. No signed message is accepted until its sender's keys have been checked against its id |
 | **Signing (planned, S2)** | A second key pair, ECDSA P-256, made at the same time and also non-exportable. Its public key is announced in presence. Room messages (which every device sees, so no pair key covers them) and anything passed on for someone else (piece hashes, R1) are signed with it. Every device checks the signature and drops anything that doesn't match |
 
 ### 6.1 Identity (planned: S2, S18, S19, S20)
@@ -109,7 +109,7 @@ There are no accounts. A device is known by what it holds, not by who the person
 
 | Part | Where it comes from | How long it lasts |
 |---|---|---|
-| Device id | Today random. Planned: the hash of the public key (S2, #24), so it lasts as long as the key | The tab's lifetime (S18) |
+| Device id | Today random. Planned: the hash of both public keys (S2, #24), so it lasts as long as the keys | The tab's lifetime (S18) |
 | Name | Typed by the person. Checked by `validName`, compared by its name key (S19) | The tab's lifetime |
 | Encryption and signing keys | Made in the browser. The private keys can't be exported | The tab's lifetime. Longer only if the person turns on "Remember this device" (S20) |
 | Colour and icon | Picked from the signing key's SHA-256: about 12 colours × 16 icons | As long as the key |
