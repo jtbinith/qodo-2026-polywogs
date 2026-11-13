@@ -38,3 +38,15 @@ test('/agent retry is told apart from an instruction', () => {
   assert.deepEqual(lib.parseAsk?.('/agent retry'), { retry: true });
   assert.deepEqual(lib.parseAsk?.('/agent  say "Getting it…" instead'), { retry: false, text: 'say "Getting it…" instead' });
 });
+
+// from Qodo's review of 416e751 and the reviewer's notes
+test('a regular expression with a bracket in the condition is skipped', () => {
+  assert.deepEqual(lib.testNames(diff("check(/foo\\)/.test(value), 'a meaningful assertion about foo');")), ['a meaningful assertion about foo']);
+});
+test('a check() in one hunk is not closed by an unrelated hunk', () => {
+  const d = ['@@ -1,0 +1,1 @@', '+  check(ok,', '@@ -40,0 +41,1 @@', "+    'an unrelated string here');"].join('\n');
+  assert.deepEqual(lib.testNames(d), []);
+});
+test('a comment inside a wrapped check() is skipped', () => {
+  assert.deepEqual(lib.testNames(diff('check(ok, // the second tap', "  'tapping again asks only once');")), ['tapping again asks only once']);
+});
