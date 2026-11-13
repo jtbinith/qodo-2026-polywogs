@@ -50,3 +50,7 @@ test('a check() in one hunk is not closed by an unrelated hunk', () => {
 test('a comment inside a wrapped check() is skipped', () => {
   assert.deepEqual(lib.testNames(diff('check(ok, // the second tap', "  'tapping again asks only once');")), ['tapping again asks only once']);
 });
+test('a retry pushes only when there is something new, otherwise it waits for Qodo again', () => {
+  assert.equal(lib.retryPlan?.('abc1234', 'def5678'), 'push');
+  assert.equal(lib.retryPlan?.('abc1234', 'abc1234'), 'wait');
+});
