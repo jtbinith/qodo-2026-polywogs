@@ -18,7 +18,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, symlinkSync, openSync, closeSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { testNames as namesInDiff, assertionFailures } from './runner-lib.mjs';
+import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan } from './runner-lib.mjs';
 
 // Measured on PRs #39-#47: Qodo's first review took 0:25-3:19, re-reviews about 1 min.
 const LIMITS = {
@@ -104,7 +104,7 @@ function qodoReview(pr) {
   if (!c) return null;
   const reviewed = [...c.body.matchAll(/commit\/([0-9a-f]{40}) -->/g)].at(-1)?.[1];
   const open = [...c.body.matchAll(/<summary>\s+\d+\.\s+(.*?)<\/summary>/g)].map((m) => m[1])
-    .filter((t) => !t.startsWith('<s>') && !/Resolved/.test(t)).map((t) => t.replace(/<[^>]+>/g, '').trim());
+    .filter((t) => !t.startsWith('<s>') && !/Resolved/.test(t)).map((t) => decodeEntities(t.replace(/<[^>]+>/g, '').trim()));
   return { reviewed, open, body: c.body };
 }
 const ownerAsks = (s) => issueComments(s.pr).filter((x) => x.user.login === OWNER && /^\/agent\s/.test(x.body) && x.id > (s.lastAsk || 0));
@@ -138,7 +138,7 @@ for (const tool of ['node', 'npm', 'npx']) writeFileSync(join(BIN, tool), `#!/bi
 }
 const TOOLS = 'Read,Edit,Write,Glob,Grep,Bash,Skill';
 const ALLOW = ['Skill',   // Read, Glob, Grep and Edit are allowed only inside the worktree (in agent())
-  'Bash(npm test)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(node tests/:*)',
+  'Bash(npm test:*)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(node tests/:*)',
   'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git commit:*)'];
 const DENY = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git reset:*)', 'Bash(git remote:*)', 'Bash(gh:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(ssh:*)', 'WebFetch', 'WebSearch'];
 class Stop extends Error {}
@@ -224,7 +224,7 @@ function stop(n, s, label, why) {
     (unchecked.length ? `**Needs your check by hand** (the agent couldn't check these itself):\n${unchecked.map((u) => `- [ ] ${u}`).join('\n')}\n\n` : '') +
     (assumed ? `**Assumptions the agent made** (the ticket didn't say):\n${assumed}\n\n` : '') +
     (s ? `Agent runs: ${s.runs} · review rounds: ${s.round}/${LIMITS.reviewRounds} · comment rounds: ${s.commentRounds}/${LIMITS.commentRounds}` + (s.pr ? ` · PR #${s.pr}` : '') : '') +
-    (label === L.done && s?.pr ? `\n\nWant a change before you merge? Comment \`/agent <what to change>\` on PR #${s.pr}.` : '') +
+    (s?.pr ? `\n\nOn PR #${s.pr}: comment \`/agent <what to change>\` for another round, or \`/agent retry\` if the runner itself was wrong. Both count towards the ${LIMITS.commentRounds} comment rounds.` : '') +
     (report ? `\n\n<details><summary>Agent report</summary>\n\n${report}\n</details>` : ''));
   const extra = unchecked.length ? ` ${unchecked.length} check${unchecked.length > 1 ? 's need' : ' needs'} you.` : '';
   const first = why.split('\n')[0], rest = why.split('\n').slice(1).join('\n');
@@ -298,7 +298,14 @@ function continueRun(n, s) {
       if (s.commentRounds >= LIMITS.commentRounds) throw new Stop(`The /agent comment limit (${LIMITS.commentRounds}) is used up.`);
       s.commentRounds++; s.lastAsk = asks.at(-1).id; save(n, s);
       event(n, `owner asked on PR #${s.pr}: ${asks.map((a) => a.body.slice(7, 80)).join(' | ')}`);
-      writeReview(s, q && q.reviewed === s.head ? q : null, asks);
+      const asked = asks.map((a) => parseAsk(a.body)), told = asked.filter((a) => !a.retry);
+      if (!told.length) {   // only /agent retry: the runner was wrong, so re-check without an agent run
+        if (retryPlan(head(s), s.head) === 'push') checkAndPush(n, s, 'owner retry');
+        else { s.pushedAt = Date.now(); save(n, s); event(n, `owner retry: nothing new to push, waiting for Qodo's review of ${s.head.slice(0, 7)} again`); }
+        continue;
+      }
+      // instructions go to the agent; a retry alongside them is covered, since the checks run after it anyway
+      writeReview(s, q && q.reviewed === s.head ? q : null, asks.filter((a, i) => !asked[i].retry));
       agent(n, s, 'owner-comment', `Unattended run. jtbinith commented on PR #${s.pr} for ticket #${n}. The comment is in .agent/review.md. Make that change test first (a test: commit, then a fix: commit), following AGENTS.md and the work-ticket skill. Update .agent/report.md.`);
       checkAndPush(n, s, 'owner comment');
     } else if (!q || q.reviewed !== s.head) {
@@ -336,13 +343,14 @@ try {
     process.exit(0);
   }
 
-  // a finished run whose PR is still open: an /agent comment from the owner starts another round
-  for (const { number: n } of ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.done, '--json', 'number')) {
+  // a finished or stopped run whose PR is still open: an /agent comment from the owner starts another round
+  const finished = [L.done, L.help].flatMap((l) => ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', l, '--json', 'number'));
+  for (const { number: n } of finished) {
     const s = load(n);
     if (!s?.pr || ghJson('pr', 'view', String(s.pr), '-R', REPO, '--json', 'state').state !== 'OPEN' || !ownerAsks(s).length) continue;
     current = { n, s };
     const has = issue(n).labels.map((l) => l.name);
-    setLabels(n, [L.working], [L.done, L.manual].filter((l) => has.includes(l)));
+    setLabels(n, [L.working], [L.done, L.help, L.manual].filter((l) => has.includes(l)));
     s.phase = 'review'; save(n, s);
     event(n, `reopened by an /agent comment on PR #${s.pr}`); notify(`#${n}: working on your /agent comment`);
     continueRun(n, s);

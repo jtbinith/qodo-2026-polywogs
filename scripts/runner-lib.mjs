@@ -83,3 +83,6 @@ export const decodeEntities = (t) => t.replace(/&#x([0-9a-f]+);/gi, (_, h) => St
 // An owner's /agent comment: `/agent retry` re-runs the runner's checks with no agent run.
 // Anything else is an instruction for the agent.
 export const parseAsk = (body) => (/^\/agent\s+retry\s*$/i.test(body.trim()) ? { retry: true } : { retry: false, text: body.trim().replace(/^\/agent\s+/i, '') });
+
+// /agent retry: re-check and push when the branch has commits Qodo hasn't seen, otherwise wait for its review again
+export const retryPlan = (head, pushed) => (head !== pushed ? 'push' : 'wait');
