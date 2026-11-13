@@ -12,5 +12,5 @@ WorkingDirectory=%h/qodo-hack-2026
 Environment=PATH=%h/.nvm/versions/node/v25.2.1/bin:%h/.toolbox/bin:/usr/local/bin:/usr/bin:/bin
 # run the merged copy from origin/main, not whatever branch the working checkout is on
 ExecStartPre=/usr/bin/git -C %h/qodo-hack-2026 fetch -q origin main
-ExecStartPre=/bin/sh -c 'mkdir -p %h/.local/state/qodo-agent && git -C %h/qodo-hack-2026 show origin/main:scripts/agent-watch.mjs > %h/.local/state/qodo-agent/agent-watch.mjs'
+ExecStartPre=/bin/sh -c 'mkdir -p %h/.local/state/qodo-agent && for f in agent-watch.mjs runner-lib.mjs; do git -C %h/qodo-hack-2026 show origin/main:scripts/$f > %h/.local/state/qodo-agent/$f || exit 1; done'
 ExecStart=%h/.nvm/versions/node/v25.2.1/bin/node %h/.local/state/qodo-agent/agent-watch.mjs
