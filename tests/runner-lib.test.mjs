@@ -65,11 +65,25 @@ test('an old stop file is cleared before each agent run and when the owner reope
   assert.deepEqual(lib.staleFiles?.('agent-run'), ['stop.md']);                       // test-output.txt is written just before a fix-tests run, so it stays
   assert.deepEqual(lib.staleFiles?.('reopen'), ['stop.md', 'test-output.txt']);
 });
-test('proofs not yet posted are found, including on a run saved before this was tracked (#41 at 09:51)', () => {
-  assert.deepEqual(lib.unpublished?.(['p1', 'p2'], 1), ['p2']);
-  assert.deepEqual(lib.unpublished?.(['p1', 'p2'], 2), []);
-  assert.deepEqual(lib.unpublished?.(['p1', 'p2'], undefined, true), ['p2']);   // an older run: its first proof went into the PR when it was opened
-  assert.deepEqual(lib.unpublished?.(['p1'], undefined, false), ['p1']);
+test('what to publish is read from the PR itself, so old runs and half-finished posts are not repeated (Qodo on 829263e)', () => {
+  const p1 = '**Red → green, checked by the runner** (not the agent) for main..aaa:\n- a', p2 = '**Red → green, checked by the runner** (not the agent) for aaa..bbb:\n- b';
+  const p3 = '**Red → green, checked by the runner** (not the agent) for bbb..ccc:\n- c';
+  const plan = (body, comments) => lib.publishPlan?.([p1, p2, p3], body, comments);
+  // #41 at 09:51: opened with p1, p2 pushed but never posted
+  assert.deepEqual(plan('Closes #41\n\n' + p1, []), { updateBody: true, comment: [p2, p3] });
+  // an older run that posted p2 as a comment already: only p3 is missing
+  assert.deepEqual(plan('Closes #41\n\n' + p1, [p2]), { updateBody: true, comment: [p3] });
+  // interrupted after the description and p2: only p3 is posted again
+  assert.deepEqual(plan('Closes #41\n\n' + [p1, p2, p3].join('\n\n'), [p2]), { updateBody: false, comment: [p3] });
+  assert.deepEqual(plan('Closes #41\n\n' + [p1, p2, p3].join('\n\n'), [p2, p3]), { updateBody: false, comment: [] });
+});
+test('a comment over a limit is still marked read, so it cannot stop the run again on every tick (Qodo on 829263e)', () => {
+  const L = { commentRounds: 3, retryRounds: 5 };
+  const plan = (asked, c, r) => lib.askPlan?.({ asked, commentRounds: c, retryRounds: r, limits: L });
+  assert.deepEqual(plan([{ retry: true }], 0, 5), { consume: true, kind: 'retry', stop: 'The /agent retry limit (5) is used up.', commentRounds: 0, retryRounds: 5 });
+  assert.deepEqual(plan([{ retry: true }], 3, 1), { consume: true, kind: 'retry', commentRounds: 3, retryRounds: 2 });
+  assert.deepEqual(plan([{ retry: false, text: 'x' }, { retry: true }], 1, 0), { consume: true, kind: 'instruction', commentRounds: 2, retryRounds: 0 });
+  assert.deepEqual(plan([{ retry: false, text: 'x' }], 3, 0), { consume: true, kind: 'instruction', stop: 'The /agent instruction limit (3) is used up.', commentRounds: 3, retryRounds: 0 });
 });
 test('every page is read, so a list past 100 is complete', () => {
   const pages = { 1: Array(100).fill('a'), 2: Array(100).fill('b'), 3: ['c'] };
