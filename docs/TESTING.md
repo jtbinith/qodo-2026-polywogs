@@ -57,7 +57,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | S4 | Integration | A device the host hasn't accepted receives nothing (to write) |
 | S9 | Integration, Acceptance | A blocked device's prints disappear. A stranger's thumbnail is blurred (to write) |
 | S11 | Integration | A room's code stops working 30 minutes after the last device leaves (to write) |
-| S13 | System | After Leave, no received file or thumbnail is left in memory (to write) |
+| S13 | System | After Leave, no received file or thumbnail is left in memory and the tab's keys are gone from IndexedDB (to write) |
 | S14 | Unit, System | `tests/thumb.test.mjs`: a thumbnail over 400 × 400 pixels, whose size can't be read or with bytes after its end marker is not decoded. The two-browser test sends 400 × 400, 401 × 400, a 30000 × 30000 image bomb and a 400 × 400 with 30000 bytes after its end: only the first is decoded, the others show a plain card (exists) |
 | S15 | Acceptance | The site loaded inside another site's frame refuses to run (manual) |
 | S16 | System | The room code is gone from the address bar after joining (to write) |
@@ -65,6 +65,17 @@ Which level of test proves each requirement. Results are recorded on each requir
 | Q3 | Acceptance | The Qodo review standards list shows one fingerprint standard (manual) |
 | S17 | Unit | HEIC, PNG, WebP and video fixtures with GPS arrive without it (to write) |
 | L2 | Acceptance | A first-time user joins screens with only the on-screen guide (manual) |
+| C15 | System | Two browsers click facing join tabs within 2 s and join. Non-facing tabs don't join and nor do taps 3 s apart. Undo splits them (to write) |
+| C16 | Integration | A mini-map request joins nothing until the other device accepts. "No" leaves both screens as they were (to write) |
+| F11, F12 | System | Three devices: a print dropped into a joined space is fetched by both others with no drag. A print shared with everyone reaches a device that isn't joined. A 30 MB file waits for a tap. Nothing is fetched by itself during a join's 10-second Undo window, nor prints from before the join (to write) |
+| F13 | Acceptance | "Save all" opens the share sheet once with every received photo on an iPhone and an Android phone (manual) |
+| F16 | System | A drag ended by `pointercancel` puts the print back. A print pushed past the screen edge keeps 40 px on screen. A print dropped across a shared edge ends fully on one screen (to write) |
+| F17 | System | Click, move, click moves a print with no button held. Esc puts it back (to write) |
+| F18 | Acceptance | On a real iPhone and Android phone, using the site never triggers a back swipe, a pull-down panel or the home bar (manual) |
+| S18 | System | Reloading a joined device mid-transfer keeps its id, name and join. The transfer restarts and finishes. No received bytes are in IndexedDB. A duplicated tab gets a new id. After a tab closes, the next start-up deletes its stored keys (to write) |
+| S19 | Unit | A table of names: "Sam" clashes with "sam", "SAM", "Ｓａｍ" and " Sam "; "José" clashes with "Jose"; "Sam M" doesn't clash with "Sam"; names with a zero-width space, a text-direction override, Latin mixed with Cyrillic ("Ѕam") or 25 characters are refused; "山田さくら" (Han with Hiragana) is allowed; two different Devanagari names that differ only in a vowel sign don't clash; "👩‍👩‍👧" is allowed and counts as one character (to write) |
+| S20 | System | With "Remember this device" on, a reload in a new tab shows "seen before" to the other device. A different device using the same name shows "new device". Forget clears both. A device that never turned it on isn't stored by anyone (to write) |
+| R1–R4 | System | Chaos runs of the browser test: a share of relay frames dropped, a holder stopped halfway, a device delayed, a piece corrupted. Each must still end with the right SHA-256. Results go to the R4 dashboard (later) |
 
 ## 3. Running the tests
 ```sh
