@@ -65,6 +65,17 @@ Which level of test proves each requirement. Results are recorded on each requir
 | Q3 | Acceptance | The Qodo review standards list shows one fingerprint standard (manual) |
 | S17 | Unit | HEIC, PNG, WebP and video fixtures with GPS arrive without it (to write) |
 | L2 | Acceptance | A first-time user joins screens with only the on-screen guide (manual) |
+| C15 | System | Two browsers click facing join tabs within 2 s and join. Non-facing tabs don't join and nor do taps 3 s apart. Undo splits them (to write) |
+| C16 | Integration | A mini-map request joins nothing until the other device accepts. "No" leaves both screens as they were (to write) |
+| F11, F12 | System | Three devices: a print dropped into a joined space is fetched by both others with no drag. A print shared with everyone reaches a device that isn't joined. A 30 MB file waits for a tap (to write) |
+| F13 | Acceptance | "Save all" opens the share sheet once with every received photo on an iPhone and an Android phone (manual) |
+| F16 | System | A drag ended by `pointercancel` puts the print back. A print pushed past the screen edge keeps 40 px on screen. A print dropped across a shared edge ends fully on one screen (to write) |
+| F17 | System | Click, move, click moves a print with no button held. Esc puts it back (to write) |
+| F18 | Acceptance | On a real iPhone and Android phone, using the site never triggers a back swipe, a pull-down panel or the home bar (manual) |
+| S18 | System | Reloading a joined device mid-transfer keeps its id, name and join. The transfer finishes. A duplicated tab gets a new id (to write) |
+| S19 | Unit | A table of names: "Sam" clashes with "sam", "SAM", "Ｓａｍ" and " Sam "; "José" clashes with "Jose"; "Sam M" doesn't clash with "Sam"; names with a zero-width space, a text-direction override, mixed scripts or 25 characters are refused; "👩‍👩‍👧" counts as one character (to write) |
+| S20 | System | With "Remember this device" on, a reload in a new tab shows "seen before" to the other device. A different device using the same name shows "new device". Forget clears both (to write) |
+| R1–R4 | System | Chaos runs of the browser test: a share of relay frames dropped, a holder stopped halfway, a device delayed, a piece corrupted. Each must still end with the right SHA-256. Results go to the R4 dashboard (later) |
 
 ## 3. Running the tests
 ```sh
