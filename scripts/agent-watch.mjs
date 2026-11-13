@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Runs one ticket through the factory without anyone opening a session.
 //
-// A systemd timer runs this every 2 minutes (scripts/systemd/), from the copy on origin/main.
-// Each run does at most one step:
+// A systemd timer runs this every 10 minutes (scripts/systemd/), from the copy on origin/main.
+// Once it picks a ticket up, it stays until the run is done or stopped:
 //   1. pick up: an open issue written by jtbinith and labelled `ready-for-agent` by jtbinith.
 //      A Claude Code subagent works it with the work-ticket skill in its own worktree.
 //   2. check and push: the script (not the agent) checks what the agent changed, runs `npm test`,
@@ -25,6 +25,7 @@ const LIMITS = {
   reviewRounds: 3,          // Qodo review rounds the agent may answer
   commentRounds: 3,         // rounds started by a `/agent` comment from the owner
   reviewWaitMin: 10,        // minutes to wait for Qodo after a push (about 3x the slowest seen)
+  reviewPollSec: 30,        // how often to look for Qodo's review while waiting (re-reviews take about 1 min)
   agentRunMin: 45,          // one subagent run
   testRunMin: 15,           // one `npm test`
 };
@@ -38,7 +39,7 @@ const GUARDED = [/^package(-lock)?\.json$/, /^scripts\//, /^\.claude\//, /^\.git
 mkdirSync(join(HOME, 'logs'), { recursive: true }); mkdirSync(WORK, { recursive: true });
 
 const now = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-const event = (n, msg) => { const line = `${now()} #${n} ${msg}`; appendFileSync(join(HOME, 'events.log'), line + '\n'); console.log(line); };
+const event = (n, msg) => { const line = `${now()} #${n} ${msg}`; appendFileSync(join(HOME, 'events.log'), line + '\n'); console.log(line); try { writeFileSync(join(HOME, 'lock'), String(Date.now())); } catch {} };   // every event also keeps the lock fresh
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
 const gh = (...args) => sh('gh', args);
 const ghJson = (...args) => JSON.parse(gh(...args) || 'null');
@@ -53,7 +54,7 @@ const LOCK = join(HOME, 'lock');
 let lockFd;
 try { lockFd = openSync(LOCK, 'wx'); } catch {
   const age = (Date.now() - Number(readFileSync(LOCK, 'utf8') || 0)) / 60000;
-  if (age < LIMITS.agentRunMin * 3 + LIMITS.testRunMin * 6) process.exit(0);
+  if (age < LIMITS.agentRunMin + LIMITS.testRunMin * 4) process.exit(0);   // refreshed between steps
   unlinkSync(LOCK); lockFd = openSync(LOCK, 'wx');                       // left over from a crash
 }
 writeFileSync(LOCK, String(Date.now()));
@@ -287,16 +288,12 @@ function refuse(n, t, e) {
   }
 }
 
-// ---- one step per tick ----
-let current = null;
-try {
-  // the labels must exist before the owner can apply ready-for-agent: create them on the first run
-  const LABELS_OK = join(HOME, 'labels-ok');
-  if (!existsSync(LABELS_OK)) { ensureLabels(); writeFileSync(LABELS_OK, now()); }
-  const working = ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.working, '--json', 'number');
-  if (working.length) {
-    const n = working[0].number, s = load(n); current = { n, s };
-    if (!s || s.phase !== 'review') throw new Stop(`Found #${n} labelled ${L.working} with no run in progress (phase: ${s?.phase ?? 'none'}). A run probably crashed.`);
+// After a push the runner waits for Qodo itself, checking every 30 s (re-reviews were measured at
+// about 1 min), then answers the review. It ends the tick only when the run is done or stopped.
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function continueRun(n, s) {
+  for (;;) {
+    writeFileSync(LOCK, String(Date.now()));                     // still alive: keeps the lock fresh
     const asks = ownerAsks(s), q = qodoReview(s.pr);
     if (asks.length) {
       if (s.commentRounds >= LIMITS.commentRounds) throw new Stop(`The /agent comment limit (${LIMITS.commentRounds}) is used up.`);
@@ -307,19 +304,35 @@ try {
       checkAndPush(n, s, 'owner comment');
     } else if (!q || q.reviewed !== s.head) {
       if ((Date.now() - s.pushedAt) / 60000 > LIMITS.reviewWaitMin) throw new Stop(`Qodo hasn't reviewed ${s.head.slice(0, 7)} after ${LIMITS.reviewWaitMin} min.`);
+      sleep(LIMITS.reviewPollSec * 1000);
     } else if (!q.open.length) {
-      stop(n, s, L.done, `Qodo has no open findings on ${s.head.slice(0, 7)}. PR #${s.pr} is ready for you to review and merge.`);
+      event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((Date.now() - s.pushedAt) / 1000)} s after the push: no open findings`);
+      return stop(n, s, L.done, `Qodo has no open findings on ${s.head.slice(0, 7)}. PR #${s.pr} is ready for you to review and merge.`);
     } else if (s.round >= LIMITS.reviewRounds) {
       throw new Stop(`${q.open.length} Qodo findings still open after ${LIMITS.reviewRounds} review rounds: ${q.open.join('; ')}`);
     } else {
       s.round++; save(n, s);
-      event(n, `Qodo round ${s.round}: ${q.open.length} open (${q.open.join('; ')})`);
+      event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((Date.now() - s.pushedAt) / 1000)} s after the push. Round ${s.round}: ${q.open.length} open (${q.open.join('; ')})`);
       writeReview(s, q, []);
       const before = head(s);
       agent(n, s, `review-${s.round}`, `Unattended run. Handle the review of PR #${s.pr} using step 7 of the skill at .claude/skills/work-ticket/SKILL.md. The review is in .agent/review.md.`);
       if (head(s) === before) throw new Stop(`The agent checked Qodo's ${q.open.length} open findings and judged none of them real (see its report). PR #${s.pr} needs your call.`);
       checkAndPush(n, s, `review round ${s.round}`);
     }
+  }
+}
+
+// ---- one step per tick ----
+let current = null;
+try {
+  // the labels must exist before the owner can apply ready-for-agent: create them on the first run
+  const LABELS_OK = join(HOME, 'labels-ok');
+  if (!existsSync(LABELS_OK)) { ensureLabels(); writeFileSync(LABELS_OK, now()); }
+  const working = ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.working, '--json', 'number');
+  if (working.length) {
+    const n = working[0].number, s = load(n); current = { n, s };
+    if (!s || s.phase !== 'review') throw new Stop(`Found #${n} labelled ${L.working} with no run in progress (phase: ${s?.phase ?? 'none'}). A run probably crashed.`);
+    continueRun(n, s);
     process.exit(0);
   }
 
@@ -352,6 +365,7 @@ try {
     putAgentFile(s, 'ticket.md', `# #${t.number} ${t.title}\n${t.html_url}\nWritten by ${t.user.login}. Labels: ${t.labels.map((l) => l.name).join(', ')}\n\n${t.body}\n`);
     agent(n, s, 'work', `Work ticket #${n} using the skill at .claude/skills/work-ticket/SKILL.md. This is an unattended run: follow its "Unattended runs" section. The ticket is in .agent/ticket.md.`);
     checkAndPush(n, s, 'first push');
+    continueRun(n, s);
     break;
   }
 } catch (e) {

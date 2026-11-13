@@ -3,6 +3,8 @@ Description=Qodo factory: one step of the ticket loop (scripts/agent-watch.mjs)
 
 [Service]
 Type=oneshot
+# a run can last a while: it waits for Qodo and the agent inside one start
+TimeoutStartSec=infinity
 WorkingDirectory=%h/qodo-hack-2026
 # node and claude live under the home directory, not in systemd's default PATH
 Environment=PATH=%h/.nvm/versions/node/v25.2.1/bin:%h/.toolbox/bin:/usr/local/bin:/usr/bin:/bin

@@ -17,7 +17,7 @@ Every device in a room is a stranger: anyone with the room code can send anythin
 | `web/strip.js` | Removes location and camera details from JPEG photos before sending (S6) |
 | `tests/` | Unit tests and the two-browser test |
 | `docs/` | Requirements, architecture, threat model and test plan |
-| `scripts/agent-watch.mjs` | Works a `ready-for-agent` ticket without anyone opening a session. A systemd timer (`scripts/systemd/`) runs it every 2 minutes |
+| `scripts/agent-watch.mjs` | Works a `ready-for-agent` ticket without anyone opening a session. A systemd timer (`scripts/systemd/`) runs it every 10 minutes |
 
 ## Docs
 Requirements: `docs/PRD.md`. Design and message types: `docs/ARCHITECTURE.md`. Threats: `docs/THREAT-MODEL.md`. Tests: `docs/TESTING.md`. Every ticket cites its PRD ID (for example S6) and every PR names the IDs it covers. Tickets are worked with the `work-ticket` skill (`.claude/skills/work-ticket/`).
