@@ -33,7 +33,7 @@ const LIMITS = {
 const REPO = 'jtbinith/qodo-hack-2026', OWNER = 'jtbinith', QODO = 'qodo-code-review[bot]';
 const MAIN = join(homedir(), 'qodo-hack-2026');
 const HOME = join(homedir(), '.local/state/qodo-agent'), WORK = join(homedir(), 'qodo-agent');
-const L = { ready: 'ready-for-agent', working: 'agent-working', done: 'agent-done', help: 'agent-needs-help',
+const L = { ready: 'ready-for-agent', working: 'agent-working', done: 'agent-done', help: 'agent-needs-help', manual: 'needs-manual-check',
   blocked: 'agent-refused: blocked', notOwner: 'agent-refused: not owner\'s ticket' };
 // paths the agent must never change: the factory itself
 const GUARDED = [/^package(-lock)?\.json$/, /^scripts\//, /^\.claude\//, /^\.github\//, /^AGENTS\.md$/, /^\.gitignore$/, /^node_modules/];
@@ -76,6 +76,7 @@ const comment = (n, body) => gh('issue', 'comment', String(n), '-R', REPO, '--bo
 const LABEL_INFO = {
   [L.ready]: ['0e8a16', 'Owner only: the factory works this ticket unattended'], [L.working]: ['fbca04', 'The factory is working this ticket'],
   [L.done]: ['1d76db', 'The factory finished; waiting for the owner to merge'], [L.help]: ['d93f0b', 'The factory stopped and needs the owner'],
+  [L.manual]: ['c5def5', 'The factory finished, but some acceptance needs the owner to check by hand'],
   [L.blocked]: ['5319e7', "Refused before starting: an issue it's blocked by is still open"], [L.notOwner]: ['5319e7', "Refused before starting: the ticket wasn't written by the owner"],
 };
 function ensureLabels() {   // a fresh repo has none of these: create what's missing before using any
@@ -225,15 +226,33 @@ function proveRed(n, s, base) {
   return lines;
 }
 
+// the agent's Assumptions section from its report, shown in the open (not folded away)
+const assumptions = (report) => (report.match(/^#+\s*Assumptions\s*\n([\s\S]*?)(?=^#+\s|(?![\s\S]))/m)?.[1] || '').trim();
+// acceptance the agent couldn't check itself: unticked boxes in its PR description
+const uncheckedCriteria = (body) => body.split('\n').filter((l) => /^\s*[-*]\s*\[ \]/.test(l)).map((l) => l.replace(/^\s*[-*]\s*\[ \]\s*/, '').trim());
+// a one-line reason for the popup: the first list item, else the first plain sentence (no headings or links)
+function shortReason(text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const item = lines.find((l) => /^[-*]\s/.test(l)), plain = lines.find((l) => !/^(#|>|https?:)/.test(l) && !l.endsWith(':'));
+  return ((item || plain || '').replace(/^[-*]\s+/, '').replace(/[*_`]/g, '').split(/(?<=\.)\s/)[0] || '').slice(0, 110);
+}
 function stop(n, s, label, why) {
   if (s) { s.phase = label === L.done ? 'done' : 'help'; save(n, s); }
   const has = issue(n).labels.map((l) => l.name);
-  setLabels(n, [label], [L.working, L.ready].filter((l) => has.includes(l)));
-  const report = s ? agentFile(s, 'report.md') : '';
+  const report = s ? agentFile(s, 'report.md') : '', unchecked = label === L.done && s ? uncheckedCriteria(agentFile(s, 'pr-body.md')) : [];
+  setLabels(n, [label, ...(unchecked.length ? [L.manual] : [])], [L.working, L.ready].filter((l) => has.includes(l)));
+  const assumed = assumptions(report);
   comment(n, `**Factory run ${label === L.done ? 'finished' : 'stopped and needs you'}.** ${why}\n\n` +
+    (unchecked.length ? `**Needs your check by hand** (the agent couldn't check these itself):\n${unchecked.map((u) => `- [ ] ${u}`).join('\n')}\n\n` : '') +
+    (assumed ? `**Assumptions the agent made** (the ticket didn't say):\n${assumed}\n\n` : '') +
     (s ? `Agent runs: ${s.runs} · review rounds: ${s.round}/${LIMITS.reviewRounds} · comment rounds: ${s.commentRounds}/${LIMITS.commentRounds}` + (s.pr ? ` · PR #${s.pr}` : '') : '') +
+    (label === L.done && s?.pr ? `\n\nWant a change before you merge? Comment \`/agent <what to change>\` on PR #${s.pr}.` : '') +
     (report ? `\n\n<details><summary>Agent report</summary>\n\n${report}\n</details>` : ''));
-  event(n, `${label}: ${why.split('\n')[0]}`); notify(`#${n}: ${label}. ${why.split('\n')[0]}`);
+  const extra = unchecked.length ? ` ${unchecked.length} check${unchecked.length > 1 ? 's need' : ' needs'} you.` : '';
+  const first = why.split('\n')[0], rest = why.split('\n').slice(1).join('\n');
+  const reason = rest.trim() ? `${first.replace(/:$/, '.')} ${shortReason(rest)}` : first;
+  if (label === L.help && s && !s.pr) moveCard(n, 'Ready');   // nothing was opened: back to Ready, with the label saying why
+  event(n, `${label}: ${reason}${extra}`); notify(`#${n}: ${label}.${extra} ${reason}`);
 }
 
 // Gets the agent's commits green, proves the red, then pushes. Throws Stop when it can't.
@@ -247,7 +266,8 @@ function checkAndPush(n, s, why) {
     event(n, `npm test ${t.ok ? 'passed' : 'FAILED'} on ${head(s).slice(0, 7)}`);
     if (t.ok) break;
     if (attempt >= LIMITS.testAttempts) throw new Stop(`\`npm test\` still fails after ${attempt} attempts:\n\n${fence(t.fails.join('\n'))}`);
-    agent(n, s, 'fix-tests', `Unattended run. \`npm test\` fails on your branch for ticket #${n}. Fix the cause, not the test, following AGENTS.md and the work-ticket skill. Commit the fix. The failing lines:\n${t.fails.join('\n')}`);
+    putAgentFile(s, 'test-output.txt', t.out.split('\n').slice(-150).join('\n'));
+    agent(n, s, 'fix-tests', `Unattended run. \`npm test\` fails on your branch for ticket #${n}. The last 150 lines of the runner's run are in .agent/test-output.txt. Fix the cause, not the test, following AGENTS.md and the work-ticket skill. Commit the fix. If it isn't caused by this branch, stop as the skill says and say why. The failing lines:\n${t.fails.join('\n')}`);
   }
   const red = proveRed(n, s, s.head || s.base);
   sh('git', ['push', '-u', 'origin', `HEAD:refs/heads/${s.branch}`], { cwd: s.dir });
@@ -325,11 +345,25 @@ let current = null;
 try {
   // the labels must exist before the owner can apply ready-for-agent: create them on the first run
   const LABELS_OK = join(HOME, 'labels-ok');
-  if (!existsSync(LABELS_OK)) { ensureLabels(); writeFileSync(LABELS_OK, now()); }
+  const labelSet = Object.keys(LABEL_INFO).sort().join('|');   // re-checked whenever the set of labels changes
+  if (!existsSync(LABELS_OK) || readFileSync(LABELS_OK, 'utf8') !== labelSet) { ensureLabels(); writeFileSync(LABELS_OK, labelSet); }
   const working = ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.working, '--json', 'number');
   if (working.length) {
     const n = working[0].number, s = load(n); current = { n, s };
     if (!s || s.phase !== 'review') throw new Stop(`Found #${n} labelled ${L.working} with no run in progress (phase: ${s?.phase ?? 'none'}). A run probably crashed.`);
+    continueRun(n, s);
+    process.exit(0);
+  }
+
+  // a finished run whose PR is still open: an /agent comment from the owner starts another round
+  for (const { number: n } of ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.done, '--json', 'number')) {
+    const s = load(n);
+    if (!s?.pr || ghJson('pr', 'view', String(s.pr), '-R', REPO, '--json', 'state').state !== 'OPEN' || !ownerAsks(s).length) continue;
+    current = { n, s };
+    const has = issue(n).labels.map((l) => l.name);
+    setLabels(n, [L.working], [L.done, L.manual].filter((l) => has.includes(l)));
+    s.phase = 'review'; save(n, s);
+    event(n, `reopened by an /agent comment on PR #${s.pr}`); notify(`#${n}: working on your /agent comment`);
     continueRun(n, s);
     process.exit(0);
   }
