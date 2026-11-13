@@ -86,3 +86,11 @@ export const parseAsk = (body) => (/^\/agent\s+retry\s*$/i.test(body.trim()) ? {
 
 // /agent retry: re-check and push when the branch has commits Qodo hasn't seen, otherwise wait for its review again
 export const retryPlan = (head, pushed) => (head !== pushed ? 'push' : 'wait');
+
+// After an owner-comment round: check and push as usual, unless the agent committed nothing and a
+// retry was asked for too. Then the retry is applied as if it came alone, instead of the round
+// stopping with "no new commits".
+export function afterOwnerRound({ committed, retryAsked, head, pushed }) {
+  if (committed || !retryAsked) return 'check';
+  return retryPlan(head, pushed) === 'push' ? 'check' : 'wait';
+}

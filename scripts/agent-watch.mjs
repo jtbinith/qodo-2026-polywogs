@@ -18,7 +18,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, symlinkSync, openSync, closeSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan } from './runner-lib.mjs';
+import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound } from './runner-lib.mjs';
 
 // Measured on PRs #39-#47: Qodo's first review took 0:25-3:19, re-reviews about 1 min.
 const LIMITS = {
@@ -304,9 +304,15 @@ function continueRun(n, s) {
         else { s.pushedAt = Date.now(); save(n, s); event(n, `owner retry: nothing new to push, waiting for Qodo's review of ${s.head.slice(0, 7)} again`); }
         continue;
       }
-      // instructions go to the agent; a retry alongside them is covered, since the checks run after it anyway
+      // instructions go to the agent. A retry alongside them is covered by the checks that follow,
+      // and if the agent commits nothing it's applied as if it came alone (afterOwnerRound)
       writeReview(s, q && q.reviewed === s.head ? q : null, asks.filter((a, i) => !asked[i].retry));
+      const before = head(s);
       agent(n, s, 'owner-comment', `Unattended run. jtbinith commented on PR #${s.pr} for ticket #${n}. The comment is in .agent/review.md. Make that change test first (a test: commit, then a fix: commit), following AGENTS.md and the work-ticket skill. Update .agent/report.md.`);
+      if (afterOwnerRound({ committed: head(s) !== before, retryAsked: asked.some((a) => a.retry), head: head(s), pushed: s.head }) === 'wait') {
+        s.pushedAt = Date.now(); save(n, s); event(n, `owner comment: the agent committed nothing; applying the retry, waiting for Qodo's review of ${s.head.slice(0, 7)} again`);
+        continue;
+      }
       checkAndPush(n, s, 'owner comment');
     } else if (!q || q.reviewed !== s.head) {
       if ((Date.now() - s.pushedAt) / 60000 > LIMITS.reviewWaitMin) throw new Stop(`Qodo hasn't reviewed ${s.head.slice(0, 7)} after ${LIMITS.reviewWaitMin} min.`);
