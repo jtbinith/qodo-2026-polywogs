@@ -118,7 +118,7 @@ for (const tool of ['node', 'npm', 'npx']) writeFileSync(join(BIN, tool), `#!/bi
   writeFileSync(AGENT_SETTINGS, JSON.stringify(keep));
 }
 const TOOLS = 'Read,Edit,Write,Glob,Grep,Bash,Skill';
-const ALLOW = ['Read', 'Glob', 'Grep', 'Skill',
+const ALLOW = ['Skill',   // Read, Glob, Grep and Edit are allowed only inside the worktree (in agent())
   'Bash(npm test)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(node tests/:*)',
   'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git commit:*)'];
 const DENY = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git reset:*)', 'Bash(git remote:*)', 'Bash(gh:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(ssh:*)', 'WebFetch', 'WebSearch'];
@@ -127,7 +127,7 @@ function agent(n, s, what, prompt) {
   const log = join(HOME, 'logs', `${n}-${s.runs + 1}-${what}.log`), before = footprint(s), from = head(s);
   event(n, `agent run ${s.runs + 1} (${what}) started`);
   const r = spawnSync('claude', ['-p', prompt, '--setting-sources', 'project', '--settings', AGENT_SETTINGS, '--strict-mcp-config',
-    '--tools', TOOLS, '--allowedTools', ...ALLOW, `Edit(/${s.dir}/**)`, '--disallowedTools', ...DENY, '--output-format', 'text'],
+    '--tools', TOOLS, '--allowedTools', ...ALLOW, `Read(/${s.dir}/**)`, `Edit(/${s.dir}/**)`, '--disallowedTools', ...DENY, '--output-format', 'text'],
     { cwd: s.dir, encoding: 'utf8', timeout: LIMITS.agentRunMin * 60000, stdio: ['ignore', 'pipe', 'pipe'],
       // a small environment: the agent's node and npm are the container ones in BIN
       env: { PATH: `${BIN}:${process.env.PATH}`, HOME: homedir(), USER: process.env.USER || '', LANG: process.env.LANG || 'C.UTF-8', AWS_REGION: process.env.AWS_REGION || '', AGENT_RUN: '1' } });
