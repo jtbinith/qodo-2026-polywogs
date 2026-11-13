@@ -62,6 +62,7 @@ When the prompt says this is an unattended run, `scripts/agent-watch.mjs` starte
 - Don't push, open a PR, comment or change labels: you can't, and the script checks afterwards. It pushes after its own `npm test` and its own check that each `test:` commit fails on its own. A `test:` commit changes only `tests/`.
 - Never change `package.json`, `scripts/`, `.claude/`, `.github/`, `AGENTS.md` or `.gitignore`. The script stops the run if you do.
 - To stop instead of guessing (step 1), write why to `.agent/stop.md` and end. Don't commit anything under `.agent/`.
+- If the runner's own `npm test` fails, its last 150 lines are in `.agent/test-output.txt`. Find the step that failed there before deciding whether this branch caused it.
 - Write the PR title to `.agent/pr-title.txt` (Conventional Commits) and the PR description to `.agent/pr-body.md`, from `.github/pull_request_template.md`.
 - Write your report to `.agent/report.md`. Add an **Assumptions** section: anything you decided that the ticket didn't say. Put proposed rule or skill changes there too, as in step 7. Nobody can approve them during the run.
 - In step 7 the review is in `.agent/review.md`: Qodo's open findings and comments, and any `/agent` comment from jtbinith. It holds nothing from anyone else. Update `.agent/report.md` and `.agent/pr-body.md` with what you did.

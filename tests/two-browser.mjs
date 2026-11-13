@@ -12,6 +12,7 @@
 // Needs internet access (rooms run over Supabase Realtime). Serves web/ on 127.0.0.1 only.
 import { chromium } from 'playwright';
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { serve } from './serve.mjs';
 import { iphoneJpeg, heicFile, exifr, sizedJpeg } from './jpeg-fixtures.mjs';
 
@@ -33,7 +34,15 @@ async function device(w, h, { at = room, init, relay = RELAY } = {}) {
   await page.goto(`${BASE}?room=${at}&auto${relay ? '&relay' : ''}`);
   return page;
 }
-const until = (page, fn, arg, timeout = 30000) => page.waitForFunction(fn, arg, { timeout });
+// A wait that times out says which one it was: its line in this file and that line's code.
+const SOURCE = readFileSync(new URL(import.meta.url), 'utf8').split('\n');
+function until(page, fn, arg, timeout = 30000) {
+  const line = Number(new Error().stack.split('\n')[2]?.match(/two-browser\.mjs:(\d+):\d+/)?.[1]);
+  return page.waitForFunction(fn, arg, { timeout }).catch((e) => {
+    if (!/Timeout/.test(e.message)) throw e;
+    throw new Error(`timed out after ${timeout / 1000} s at two-browser.mjs:${line}: ${(SOURCE[line - 1] || '').trim().slice(0, 140)}`);
+  });
+}
 
 try {
   const A = await device(900, 600), B = await device(390, 700);
