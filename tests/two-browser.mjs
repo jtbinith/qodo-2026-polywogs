@@ -249,6 +249,17 @@ try {
   const edgeSaid = await toastB();
   check(edgeSaid === 'Drag it onto your screen first' && !(await B.evaluate(() => window.__t.wants.length)), `tapping a print on another screen says "${edgeSaid}" and fetches nothing`);
   at = await centre(tapPid);
+  // while B already has as many transfers arriving as it accepts, a tap can't take the photo:
+  // it says so, asks for nothing and doesn't claim it's arriving (#52 review)
+  const filled = await B.evaluate(() => { const t = window.__t, fake = [];
+    for (let i = 0; i < 1000; i++) { const before = t.incoming.size; t.expect('full:' + i, 'nobody', 1); if (t.incoming.size === before) break; fake.push('full:' + i); }
+    return fake; });
+  await B.mouse.click(at.x, at.y);
+  const fullSaid = await toastB();
+  const fullAsked = await B.evaluate((pid) => ({ wants: window.__t.wants.length, expecting: window.__t.incoming.has(pid) }), tapPid);
+  check(fullSaid === 'Too many photos arriving. Try again in a moment' && !fullAsked.wants && !fullAsked.expecting,
+    `tapping while every incoming slot is taken says "${fullSaid}" and asks for nothing (${JSON.stringify(fullAsked)})`);
+  await B.evaluate((fake) => fake.forEach((f) => window.__t.incoming.delete(f)), filled);
   await B.mouse.click(at.x, at.y);
   const tapSaid = await toastB();
   check(tapSaid === 'Receiving…', `tapping a print on your screen says "${tapSaid}"`);
