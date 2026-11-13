@@ -273,14 +273,17 @@ function checkAndPush(n, s, why) {
   sh('git', ['push', '-u', 'origin', `HEAD:refs/heads/${s.branch}`], { cwd: s.dir });
   const pushed = head(s);
   const proof = `**Red → green, checked by the runner** (not the agent) for ${s.head ? s.head.slice(0, 7) : 'main'}..${pushed.slice(0, 7)}:\n${red.join('\n')}\n- \`${pushed.slice(0, 7)}\` (head): \`npm test\` **passes**, direct and relay.`;
-  s.head = pushed; s.pushedAt = Date.now();
+  s.head = pushed; s.pushedAt = Date.now(); s.proofs = [...(s.proofs || []), proof];
+  // the PR description is always the agent's latest description plus every proof so far,
+  // so the PR and the finished-run comment read from the same text
+  const body = (agentFile(s, 'pr-body.md') || `Closes #${n}`) + '\n\n' + s.proofs.join('\n\n');
+  writeFileSync(join(HOME, `${n}-pr-body.md`), body);
   if (!s.pr) {
-    const body = (agentFile(s, 'pr-body.md') || `Closes #${n}`) + '\n\n' + proof;
-    writeFileSync(join(HOME, `${n}-pr-body.md`), body);
     const url = gh('pr', 'create', '-R', REPO, '--head', s.branch, '--base', 'main', '--title', agentFile(s, 'pr-title.txt').trim() || `Ticket #${n}`, '--body-file', join(HOME, `${n}-pr-body.md`));
     s.pr = Number(url.split('/').pop());
     event(n, `pushed ${pushed.slice(0, 7)} and opened PR #${s.pr} (${why})`);
   } else {
+    gh('pr', 'edit', String(s.pr), '-R', REPO, '--body-file', join(HOME, `${n}-pr-body.md`));
     gh('pr', 'comment', String(s.pr), '-R', REPO, '--body', proof);
     event(n, `pushed ${pushed.slice(0, 7)} to PR #${s.pr} (${why})`);
   }
@@ -298,7 +301,7 @@ function writeReview(s, q, asks) {
 
 function refuse(n, t, e) {
   try {
-    setLabels(n, [e.label], [L.ready, L.help, L.done].filter((l) => t.labels.some((x) => x.name === l)));
+    setLabels(n, [e.label], [L.ready, L.help, L.done, L.manual].filter((l) => t.labels.some((x) => x.name === l)));
     comment(n, `**Factory refused this ticket before starting.** ${e.message}\n\nRemove the reason and label it \`${L.ready}\` again to retry.`);
     event(n, `refused (${e.label}): ${e.message}`); notify(`#${n}: refused. ${e.message}`);
   } catch (e2) {
@@ -385,7 +388,7 @@ try {
     for (let k = 2; sh('git', ['ls-remote', '--heads', 'origin', branch], { cwd: MAIN }); k++) branch = `agent/${n}-${slug}-${k}`;   // a re-run gets a new branch
     const s = { n, branch, dir: join(WORK, String(n)), runs: 0, round: 0, commentRounds: 0, phase: 'work', startedAt: now() };
     current.s = s;
-    setLabels(n, [L.working], [L.ready, L.help, L.done, L.blocked, L.notOwner].filter((l) => t.labels.some((x) => x.name === l))); moveCard(n, 'In Progress');
+    setLabels(n, [L.working], [L.ready, L.help, L.done, L.manual, L.blocked, L.notOwner].filter((l) => t.labels.some((x) => x.name === l))); moveCard(n, 'In Progress');
     comment(n, `Picked up by the factory at ${s.startedAt}. Branch \`${s.branch}\`. Limits: ${LIMITS.testAttempts} test attempts, ${LIMITS.reviewRounds} Qodo rounds, ${LIMITS.commentRounds} \`/agent\` rounds.`);
     event(n, `picked up (${title})`); notify(`Picked up #${n}`);
     sh('git', ['fetch', 'origin', 'main'], { cwd: MAIN });
