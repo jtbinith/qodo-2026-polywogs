@@ -73,7 +73,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | F17 | System | Click, move, click moves a print with no button held. Esc puts it back (to write) |
 | F18 | Acceptance | On a real iPhone and Android phone, using the site never triggers a back swipe, a pull-down panel or the home bar (manual) |
 | S18 | System | Reloading a joined device mid-transfer keeps its id, name and join, and the transfer restarts and finishes. No received bytes are in IndexedDB. A duplicated tab gets a new id. After a tab closes, the next start-up deletes its stored keys (to write) |
-| S19 | Unit | A table of names: "Sam" clashes with "sam", "SAM", "Ｓａｍ" and " Sam "; "José" clashes with "Jose"; "Sam M" doesn't clash with "Sam"; names with a zero-width space, a text-direction override, mixed scripts or 25 characters are refused; "👩‍👩‍👧" counts as one character (to write) |
+| S19 | Unit | A table of names: "Sam" clashes with "sam", "SAM", "Ｓａｍ" and " Sam "; "José" clashes with "Jose"; "Sam M" doesn't clash with "Sam"; names with a zero-width space, a text-direction override, Latin mixed with Cyrillic ("Ѕam") or 25 characters are refused; "山田さくら" (Han with Hiragana) is allowed; two different Devanagari names that differ only in a vowel sign don't clash; "👩‍👩‍👧" is allowed and counts as one character (to write) |
 | S20 | System | With "Remember this device" on, a reload in a new tab shows "seen before" to the other device. A different device using the same name shows "new device". Forget clears both (to write) |
 | R1–R4 | System | Chaos runs of the browser test: a share of relay frames dropped, a holder stopped halfway, a device delayed, a piece corrupted. Each must still end with the right SHA-256. Results go to the R4 dashboard (later) |
 

@@ -118,10 +118,17 @@ There are no accounts. A device is known by what it holds, not by who the person
 
 **Names (S19).** The name key, used only for comparing:
 ```js
-const nameKey = (s) => s.normalize('NFKC').normalize('NFD').replace(/\p{M}/gu, '')
+// accents come off Latin, Greek and Cyrillic letters only: Indic vowel signs are marks too and must stay
+const nameKey = (s) => s.normalize('NFKC').normalize('NFD')
+  .replace(/([\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}])\p{M}+/gu, '$1').normalize('NFC')
   .toUpperCase().toLowerCase().trim().replace(/\s+/g, ' ');
 ```
-`toUpperCase().toLowerCase()` also folds `ß` to `ss`. `toLocaleLowerCase()` isn't used, because Turkish `İ` and `ı` change with the locale. `validName` refuses control and format characters (`\p{C}`: zero-width spaces, joiners, text-direction overrides), names that mix scripts (Latin with Cyrillic, for example) and names longer than 24 characters as seen on screen (counted with `Intl.Segmenter`). Look-alikes inside one script ("5am", "rn" for "m") can't all be caught. Neither can the colour and emoji, which only help honest people tell devices apart. "New device" (S20) and the four words (S3) are what catch a deliberate look-alike.
+`toUpperCase().toLowerCase()` also folds `ß` to `ss`. `toLocaleLowerCase()` isn't used, because Turkish `İ` and `ı` change with the locale. `validName` refuses:
+- control characters, private-use and unassigned code points, and invisible format characters: zero-width space, word joiner, `U+FEFF` and every text-direction control (`U+200E`, `U+200F`, `U+061C`, `U+202A`–`U+202E`, `U+2066`–`U+2069`). The zero-width joiner and non-joiner are allowed only between two letters or two emoji, because emoji such as 👩‍👩‍👧 and scripts such as Persian and Devanagari need them;
+- script mixes that UTS #39's "Highly Restrictive" level doesn't allow. Each character's `Script_Extensions` must fit one script, or one of Latin + Han + Hiragana + Katakana (Japanese), Latin + Han + Bopomofo or Latin + Han + Hangul (Korean). Common and Inherited characters (digits, punctuation, emoji) fit with any. So `Ѕam` (Cyrillic Ѕ with Latin) is refused and `山田さくら` is allowed;
+- names longer than 24 characters as seen on screen (counted with `Intl.Segmenter`).
+
+Two kinds of look-alike can't all be caught: look-alikes inside one script ("5am", "rn" for "m") and a name written entirely in another script that happens to look the same (Cyrillic `сор` beside Latin `cop`). Neither can the colour and emoji, which only help honest people tell devices apart. "New device" (S20) and the four words (S3) are what catch a deliberate look-alike.
 
 **Remembered devices (S20).** Off by default. When turned on, the device's signing key is kept in IndexedDB until "Forget". Other devices keep the public keys of devices they've seen, with the name each used, also in IndexedDB. A device whose key is known shows "seen before". A known name on a key that isn't known shows "new device". Nothing about this is sent to the server.
 
