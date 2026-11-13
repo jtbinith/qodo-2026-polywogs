@@ -18,7 +18,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, symlinkSync, openSync, closeSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound } from './runner-lib.mjs';
+import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound, staleFiles } from './runner-lib.mjs';
 
 // Measured on PRs #39-#47: Qodo's first review took 0:25-3:19, re-reviews about 1 min.
 const LIMITS = {
@@ -149,6 +149,7 @@ class Stop extends Error {}
 class Refuse extends Error { constructor(label, msg) { super(msg); this.label = label; } }
 function agent(n, s, what, prompt) {
   const log = join(HOME, 'logs', `${n}-${s.runs + 1}-${what}.log`), before = footprint(s), from = head(s);
+  clearStale(s, 'agent-run');
   event(n, `agent run ${s.runs + 1} (${what}) started`);
   const r = spawnSync('claude', ['-p', prompt, '--setting-sources', 'project', '--settings', AGENT_SETTINGS, '--strict-mcp-config',
     '--tools', TOOLS, '--allowedTools', ...ALLOW, `Read(/${s.dir}/**)`, `Edit(/${s.dir}/**)`, '--disallowedTools', ...DENY, '--output-format', 'text'],
@@ -177,6 +178,7 @@ function npmTest(dir) {
 }
 const head = (s) => sh('git', ['rev-parse', 'HEAD'], { cwd: s.dir });
 const agentFile = (s, f) => { const p = join(s.dir, '.agent', f); return existsSync(p) ? readFileSync(p, 'utf8') : ''; };
+const clearStale = (s, when) => staleFiles(when).forEach((f) => rmSync(join(s.dir, '.agent', f), { force: true }));
 const putAgentFile = (s, f, text) => { mkdirSync(join(s.dir, '.agent'), { recursive: true }); writeFileSync(join(s.dir, '.agent', f), text); };
 
 const testNames = (s, sha) => namesInDiff(sh('git', ['show', '--format=', '-U0', sha], { cwd: s.dir }));
@@ -358,7 +360,7 @@ try {
     current = { n, s };
     const has = issue(n).labels.map((l) => l.name);
     setLabels(n, [L.working], [L.done, L.help, L.manual].filter((l) => has.includes(l)));
-    s.phase = 'review'; save(n, s);
+    s.phase = 'review'; save(n, s); clearStale(s, 'reopen');   // the owner's comment overrides the last stop
     event(n, `reopened by an /agent comment on PR #${s.pr}`); notify(`#${n}: working on your /agent comment`);
     continueRun(n, s);
     process.exit(0);

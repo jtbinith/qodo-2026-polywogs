@@ -61,3 +61,7 @@ test('an /agent instruction the agent makes no change for stops and asks the own
   assert.equal(plan({ committed: false, retryAsked: true }), 'stop');    // not 'wait': that could mark the run done with the request undone
   assert.equal(plan({ committed: false, retryAsked: false }), 'stop');
 });
+test('an old stop file is cleared before each agent run and when the owner reopens a run (#41 at 09:28)', () => {
+  assert.deepEqual(lib.staleFiles?.('agent-run'), ['stop.md']);                       // test-output.txt is written just before a fix-tests run, so it stays
+  assert.deepEqual(lib.staleFiles?.('reopen'), ['stop.md', 'test-output.txt']);
+});
