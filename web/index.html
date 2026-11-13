@@ -158,8 +158,9 @@ function announce(peer, p) {
 // Transfers we've asked for (or been told to expect): fid -> { from, size, parts, got, n, cs, last, asks }.
 // Pieces for anything else are dropped, so a stranger can't make us store data.
 function expect(fid, from, size) {
-  if (incoming.has(fid) || incoming.size >= LIMITS.incoming) return;
+  if (incoming.has(fid) || incoming.size >= LIMITS.incoming) return false;   // full: the caller says so, and doesn't ask
   incoming.set(fid, { from, size, parts: null, got: 0, n: 0, cs: 0, last: performance.now(), asks: 0 });
+  return true;
 }
 function onMessage(from, m, bytes) {
   if (m.t === 'print') {
@@ -252,8 +253,8 @@ function dropped(p) {
   // landed on my screen and I don't have it yet: ask the owner for the full photo
   if (onMyScreen(p) && !files.has(p.pid) && !incoming.has(p.pid)) {
     const src = p.holders.find((k) => k !== id && net.peers[k]) || p.owner;
+    if (!expect(p.pid, src, p.size)) return toast('Too many photos arriving. Try again in a moment');
     p.lastSource = src;
-    expect(p.pid, src, p.size);
     peers.send(src, { t: 'want', pid: p.pid });
     toast('Receiving…');
   }
