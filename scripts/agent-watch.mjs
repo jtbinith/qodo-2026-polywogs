@@ -108,7 +108,7 @@ function qodoReview(pr) {
   const reviewed = [...c.body.matchAll(/commit\/([0-9a-f]{40}) -->/g)].at(-1)?.[1];
   const open = [...c.body.matchAll(/<summary>\s+\d+\.\s+(.*?)<\/summary>/g)].map((m) => m[1])
     .filter((t) => !t.startsWith('<s>') && !/Resolved/.test(t)).map((t) => decodeEntities(t.replace(/<[^>]+>/g, '').trim()));
-  return { reviewed, open, body: c.body };
+  return { reviewed, open, body: c.body, at: Date.parse(c.updated_at) };   // when Qodo last updated its review
 }
 const ownerAsks = (s) => issueComments(s.pr).filter((x) => x.user.login === OWNER && /^\/agent\s/.test(x.body) && x.id > (s.lastAsk || 0));
 // what the owner's account did on GitHub: compared before and after every agent run
@@ -339,13 +339,13 @@ function continueRun(n, s) {
       if (DRY) { console.log(`DRY RUN would wait for Qodo's review of ${s.head.slice(0, 7)} (reviewed so far: ${q?.reviewed?.slice(0, 7) ?? 'none'})`); process.exit(0); }
       sleep(LIMITS.reviewPollSec * 1000);
     } else if (!q.open.length) {
-      event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((Date.now() - s.pushedAt) / 1000)} s after the push: no open findings`);
+      event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((q.at - s.pushedAt) / 1000)} s after the push: no open findings`);
       return stop(n, s, L.done, `Qodo has no open findings on ${s.head.slice(0, 7)}. PR #${s.pr} is ready for you to review and merge.`);
     } else if (s.round >= LIMITS.reviewRounds) {
       throw new Stop(`${q.open.length} Qodo findings still open after ${LIMITS.reviewRounds} review rounds: ${q.open.join('; ')}`);
     } else {
       s.round++; save(n, s);
-      event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((Date.now() - s.pushedAt) / 1000)} s after the push. Round ${s.round}: ${q.open.length} open (${q.open.join('; ')})`);
+      event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((q.at - s.pushedAt) / 1000)} s after the push. Round ${s.round}: ${q.open.length} open (${q.open.join('; ')})`);
       writeReview(s, q, []);
       const before = head(s);
       agent(n, s, `review-${s.round}`, `Unattended run. Handle the review of PR #${s.pr} using step 7 of the skill at .claude/skills/work-ticket/SKILL.md. The review is in .agent/review.md.`);
