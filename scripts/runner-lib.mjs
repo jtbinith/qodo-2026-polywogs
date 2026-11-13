@@ -96,3 +96,17 @@ export const afterOwnerRound = ({ committed }) => (committed ? 'check' : 'stop')
 // an earlier agent run would otherwise stop the next round at once. test-output.txt is written just
 // before a fix-tests run, so it's only cleared when the owner reopens a run.
 export const staleFiles = (when) => (when === 'reopen' ? ['stop.md', 'test-output.txt'] : ['stop.md']);
+
+// Proofs pushed but not yet posted on the PR. A run saved before this was tracked has no count:
+// its first proof went into the PR description when the PR was opened, so only later ones are missing.
+export const unpublished = (proofs, posted, hasPr) => proofs.slice(posted ?? (hasPr ? 1 : 0));
+
+// Reads a paged GitHub list to the end (pages of 100), so nothing past the first page is missed.
+export function allPages(fetchPage) {
+  const all = [];
+  for (let page = 1; ; page++) { const p = fetchPage(page); all.push(...p); if (p.length < 100) return all; }
+}
+
+// /agent retry only re-runs the runner's checks (no agent), so it has its own limit and doesn't
+// use up the rounds for instructions.
+export const roundKind = (ask) => (ask.retry ? 'retry' : 'instruction');

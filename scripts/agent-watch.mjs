@@ -18,13 +18,14 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, symlinkSync, openSync, closeSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound, staleFiles } from './runner-lib.mjs';
+import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound, staleFiles, unpublished, allPages, roundKind } from './runner-lib.mjs';
 
 // Measured on PRs #39-#47: Qodo's first review took 0:25-3:19, re-reviews about 1 min.
 const LIMITS = {
   testAttempts: 2,          // agent runs allowed to get `npm test` green per round
   reviewRounds: 3,          // Qodo review rounds the agent may answer
-  commentRounds: 3,         // rounds started by a `/agent` comment from the owner
+  commentRounds: 3,         // rounds started by an `/agent <instruction>` comment from the owner
+  retryRounds: 5,           // `/agent retry` comments: they start no agent, so they have their own limit
   reviewWaitMin: 10,        // minutes to wait for Qodo after a push (about 3x the slowest seen)
   reviewPollSec: 30,        // how often to look for Qodo's review while waiting (re-reviews take about 1 min)
   agentRunMin: 45,          // one subagent run
@@ -33,7 +34,10 @@ const LIMITS = {
 };
 const REPO = 'jtbinith/qodo-hack-2026', OWNER = 'jtbinith', QODO = 'qodo-code-review[bot]';
 const MAIN = join(homedir(), 'qodo-hack-2026');
-const HOME = join(homedir(), '.local/state/qodo-agent'), WORK = join(homedir(), 'qodo-agent');
+// QODO_STATE points a rehearsal at a copy of the state. QODO_DRY_RUN=1 logs every GitHub write and
+// push instead of doing it, and stops before any agent run or wait: the runner rehearsed, read-only.
+const HOME = process.env.QODO_STATE || join(homedir(), '.local/state/qodo-agent'), WORK = join(homedir(), 'qodo-agent');
+const DRY = process.env.QODO_DRY_RUN === '1';
 const L = { ready: 'ready-for-agent', working: 'agent-working', done: 'agent-done', help: 'agent-needs-help', manual: 'needs-manual-check',
   blocked: 'agent-refused: blocked', notOwner: 'agent-refused: not owner\'s ticket' };
 // paths the agent must never change: the factory itself
@@ -46,7 +50,9 @@ const event = (n, msg) => { const line = `${now()} #${n} ${msg}`; appendFileSync
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: LIMITS.commandMin * 60000, killSignal: 'SIGKILL', ...opts }).trim();
 const gh = (...args) => sh('gh', args);
 const ghJson = (...args) => JSON.parse(gh(...args) || 'null');
-const notify = (msg) => spawnSync('notify-send', ['Qodo factory', msg]);
+const notify = (msg) => (DRY ? console.log(`DRY RUN would notify: ${msg}`) : spawnSync('notify-send', ['Qodo factory', msg]));
+// every GitHub write and push goes through here, so a dry run can log it instead
+const write = (what, fn, fake) => { if (!DRY) return fn(); console.log(`DRY RUN would ${what}`); return fake; };
 const stateFile = (n) => join(HOME, `${n}.json`);
 const load = (n) => existsSync(stateFile(n)) ? JSON.parse(readFileSync(stateFile(n), 'utf8')) : null;
 const save = (n, s) => writeFileSync(stateFile(n), JSON.stringify(s, null, 2));
@@ -62,18 +68,15 @@ if (!process.env.QODO_FLOCKED) {
 
 // ---- GitHub, read and written only by the script ----
 const issue = (n) => ghJson('api', `repos/${REPO}/issues/${n}`);
-function issueComments(n) {   // every page: anyone can comment on a public repo, so there may be more than 100
-  const all = [];
-  for (let page = 1; ; page++) { const p = ghJson('api', `repos/${REPO}/issues/${n}/comments?per_page=100&page=${page}`); all.push(...p); if (p.length < 100) return all; }
-}
+// every page: anyone can comment on a public repo, and a long run collects many events
+const issueComments = (n) => allPages((page) => ghJson('api', `repos/${REPO}/issues/${n}/comments?per_page=100&page=${page}`));
+const issueEvents = (n) => allPages((page) => ghJson('api', `repos/${REPO}/issues/${n}/events?per_page=100&page=${page}`));
 function labelledByOwner(n) {
-  let events = [];   // every page: the label that counts is the newest one
-  for (let page = 1; ; page++) { const p = ghJson('api', `repos/${REPO}/issues/${n}/events?per_page=100&page=${page}`); events.push(...p); if (p.length < 100) break; }
-  const latest = events.filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === L.ready).at(-1);
+  const latest = issueEvents(n).filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === L.ready).at(-1);
   return latest?.event === 'labeled' && latest.actor.login === OWNER;
 }
-const setLabels = (n, add, remove) => gh('issue', 'edit', String(n), '-R', REPO, ...add.flatMap((l) => ['--add-label', l]), ...remove.flatMap((l) => ['--remove-label', l]));
-const comment = (n, body) => gh('issue', 'comment', String(n), '-R', REPO, '--body', body);
+const setLabels = (n, add, remove) => write(`label #${n}: +${add.join(', +') || '-'} −${remove.join(', −') || '-'}`, () => gh('issue', 'edit', String(n), '-R', REPO, ...add.flatMap((l) => ['--add-label', l]), ...remove.flatMap((l) => ['--remove-label', l])));
+const comment = (n, body) => write(`comment on #${n}: ${body.split('\n')[0].slice(0, 100)}`, () => gh('issue', 'comment', String(n), '-R', REPO, '--body', body));
 const LABEL_INFO = {
   [L.ready]: ['0e8a16', 'Owner only: the factory works this ticket unattended'], [L.working]: ['fbca04', 'The factory is working this ticket'],
   [L.done]: ['1d76db', 'The factory finished; waiting for the owner to merge'], [L.help]: ['d93f0b', 'The factory stopped and needs the owner'],
@@ -82,7 +85,7 @@ const LABEL_INFO = {
 };
 function ensureLabels() {   // a fresh repo has none of these: create what's missing before using any
   const have = ghJson('label', 'list', '-R', REPO, '--limit', '200', '--json', 'name').map((l) => l.name);
-  for (const [name, [color, desc]] of Object.entries(LABEL_INFO)) if (!have.includes(name)) gh('label', 'create', name, '-R', REPO, '--color', color, '--description', desc);
+  for (const [name, [color, desc]] of Object.entries(LABEL_INFO)) if (!have.includes(name)) write(`create label ${name}`, () => gh('label', 'create', name, '-R', REPO, '--color', color, '--description', desc));
 }
 // a ticket whose refusal couldn't be reported is skipped for an hour, so it can't block the queue
 const SKIP = join(HOME, 'skip.json');
@@ -94,7 +97,7 @@ function moveCard(n, column) {
     const ITEM = gh('project', 'item-list', '7', '--owner', OWNER, '--limit', '200', '--format', 'json', '-q', `.items[] | select(.content.number==${n}) | .id`);
     const FIELD = gh('project', 'field-list', '7', '--owner', OWNER, '--format', 'json', '-q', '.fields[] | select(.name=="Status") | .id');
     const OPT = gh('project', 'field-list', '7', '--owner', OWNER, '--format', 'json', '-q', `.fields[] | select(.name=="Status") | .options[] | select(.name=="${column}") | .id`);
-    if (ITEM) gh('project', 'item-edit', '--project-id', P, '--id', ITEM, '--field-id', FIELD, '--single-select-option-id', OPT);
+    if (ITEM) write(`move #${n}'s card to ${column}`, () => gh('project', 'item-edit', '--project-id', P, '--id', ITEM, '--field-id', FIELD, '--single-select-option-id', OPT));
   } catch (e) { event(n, `card not moved to ${column}: ${e.message.split('\n')[0]}`); }
 }
 // Qodo's review comment ends with the commit it reviewed. Open findings are the numbered
@@ -112,7 +115,7 @@ const ownerAsks = (s) => issueComments(s.pr).filter((x) => x.user.login === OWNE
 const footprint = (s) => JSON.stringify({
   refs: sh('git', ['ls-remote', '--heads', 'origin'], { cwd: MAIN }),
   issue: issueComments(s.n).filter((c) => c.user.login === OWNER).length,
-  issueEvents: ghJson('api', `repos/${REPO}/issues/${s.n}/events?per_page=100`).length,
+  issueEvents: issueEvents(s.n).length,
   pr: s.pr ? issueComments(s.pr).filter((c) => c.user.login === OWNER).length : 0,
   prs: ghJson('pr', 'list', '-R', REPO, '--state', 'all', '--limit', '5', '--json', 'number').map((p) => p.number).join(),
 });
@@ -149,6 +152,7 @@ class Stop extends Error {}
 class Refuse extends Error { constructor(label, msg) { super(msg); this.label = label; } }
 function agent(n, s, what, prompt) {
   const log = join(HOME, 'logs', `${n}-${s.runs + 1}-${what}.log`), before = footprint(s), from = head(s);
+  if (DRY) throw new Stop(`DRY RUN stops here: it would start agent run ${s.runs + 1} (${what}).`);
   clearStale(s, 'agent-run');
   event(n, `agent run ${s.runs + 1} (${what}) started`);
   const r = spawnSync('claude', ['-p', prompt, '--setting-sources', 'project', '--settings', AGENT_SETTINGS, '--strict-mcp-config',
@@ -178,7 +182,7 @@ function npmTest(dir) {
 }
 const head = (s) => sh('git', ['rev-parse', 'HEAD'], { cwd: s.dir });
 const agentFile = (s, f) => { const p = join(s.dir, '.agent', f); return existsSync(p) ? readFileSync(p, 'utf8') : ''; };
-const clearStale = (s, when) => staleFiles(when).forEach((f) => rmSync(join(s.dir, '.agent', f), { force: true }));
+const clearStale = (s, when) => staleFiles(when).forEach((f) => write(`remove .agent/${f}`, () => rmSync(join(s.dir, '.agent', f), { force: true })));
 const putAgentFile = (s, f, text) => { mkdirSync(join(s.dir, '.agent'), { recursive: true }); writeFileSync(join(s.dir, '.agent', f), text); };
 
 const testNames = (s, sha) => namesInDiff(sh('git', ['show', '--format=', '-U0', sha], { cwd: s.dir }));
@@ -228,8 +232,8 @@ function stop(n, s, label, why) {
   comment(n, `**Factory run ${label === L.done ? 'finished' : 'stopped and needs you'}.** ${why}\n\n` +
     (unchecked.length ? `**Needs your check by hand** (the agent couldn't check these itself):\n${unchecked.map((u) => `- [ ] ${u}`).join('\n')}\n\n` : '') +
     (assumed ? `**Assumptions the agent made** (the ticket didn't say):\n${assumed}\n\n` : '') +
-    (s ? `Agent runs: ${s.runs} · review rounds: ${s.round}/${LIMITS.reviewRounds} · comment rounds: ${s.commentRounds}/${LIMITS.commentRounds}` + (s.pr ? ` · PR #${s.pr}` : '') : '') +
-    (s?.pr ? `\n\nOn PR #${s.pr}: comment \`/agent <what to change>\` for another round, or \`/agent retry\` if the runner itself was wrong. Both count towards the ${LIMITS.commentRounds} comment rounds.` : '') +
+    (s ? `Agent runs: ${s.runs} · review rounds: ${s.round}/${LIMITS.reviewRounds} · instruction rounds: ${s.commentRounds}/${LIMITS.commentRounds} · retries: ${s.retryRounds || 0}/${LIMITS.retryRounds}` + (s.pr ? ` · PR #${s.pr}` : '') : '') +
+    (s?.pr ? `\n\nOn PR #${s.pr}: comment \`/agent <what to change>\` for another round (up to ${LIMITS.commentRounds}), or \`/agent retry\` if the runner itself was wrong (up to ${LIMITS.retryRounds}).` : '') +
     (report ? `\n\n<details><summary>Agent report</summary>\n\n${report}\n</details>` : ''));
   const extra = unchecked.length ? ` ${unchecked.length} check${unchecked.length > 1 ? 's need' : ' needs'} you.` : '';
   const first = why.split('\n')[0], rest = why.split('\n').slice(1).join('\n');
@@ -253,24 +257,34 @@ function checkAndPush(n, s, why) {
     agent(n, s, 'fix-tests', `Unattended run. \`npm test\` fails on your branch for ticket #${n}. The last 150 lines of the runner's run are in .agent/test-output.txt. Fix the cause, not the test, following AGENTS.md and the work-ticket skill. Commit the fix. If it isn't caused by this branch, stop as the skill says and say why. The failing lines:\n${t.fails.join('\n')}`);
   }
   const red = proveRed(n, s, s.head || s.base);
-  sh('git', ['push', '-u', 'origin', `HEAD:refs/heads/${s.branch}`], { cwd: s.dir });
+  write(`push ${head(s).slice(0, 7)} to ${s.branch}`, () => sh('git', ['push', '-u', 'origin', `HEAD:refs/heads/${s.branch}`], { cwd: s.dir }));
   const pushed = head(s);
   const proof = `**Red → green, checked by the runner** (not the agent) for ${s.head ? s.head.slice(0, 7) : 'main'}..${pushed.slice(0, 7)}:\n${red.join('\n')}\n- \`${pushed.slice(0, 7)}\` (head): \`npm test\` **passes**, direct and relay.`;
   s.head = pushed; s.pushedAt = Date.now(); s.proofs = [...(s.proofs || []), proof];
-  // the PR description is always the agent's latest description plus every proof so far,
-  // so the PR and the finished-run comment read from the same text
-  const body = (agentFile(s, 'pr-body.md') || `Closes #${n}`) + '\n\n' + s.proofs.join('\n\n');
-  writeFileSync(join(HOME, `${n}-pr-body.md`), body);
   if (!s.pr) {
-    const url = gh('pr', 'create', '-R', REPO, '--head', s.branch, '--base', 'main', '--title', agentFile(s, 'pr-title.txt').trim() || `Ticket #${n}`, '--body-file', join(HOME, `${n}-pr-body.md`));
-    s.pr = Number(url.split('/').pop());
+    writeFileSync(join(HOME, `${n}-pr-body.md`), prBody(n, s));
+    const url = write(`open a PR from ${s.branch}`, () => gh('pr', 'create', '-R', REPO, '--head', s.branch, '--base', 'main', '--title', agentFile(s, 'pr-title.txt').trim() || `Ticket #${n}`, '--body-file', join(HOME, `${n}-pr-body.md`)), 'https://github.com/x/pull/0');
+    s.pr = Number(url.split('/').pop()); s.posted = s.proofs.length;
     event(n, `pushed ${pushed.slice(0, 7)} and opened PR #${s.pr} (${why})`);
-  } else {
-    gh('pr', 'edit', String(s.pr), '-R', REPO, '--body-file', join(HOME, `${n}-pr-body.md`));
-    gh('pr', 'comment', String(s.pr), '-R', REPO, '--body', proof);
-    event(n, `pushed ${pushed.slice(0, 7)} to PR #${s.pr} (${why})`);
-  }
+  } else event(n, `pushed ${pushed.slice(0, 7)} to PR #${s.pr} (${why})`);
   s.phase = 'review'; save(n, s);
+  publish(n, s);
+}
+
+// the PR description is always the agent's latest description plus every proof so far,
+// so the PR and the finished-run comment read from the same text
+const prBody = (n, s) => (agentFile(s, 'pr-body.md') || `Closes #${n}`) + '\n\n' + (s.proofs || []).join('\n\n');
+// Posts what's pushed but not yet on the PR: the description, and each new proof as a comment.
+// It's resumable: a crash between push and post is caught up on the next step or /agent retry.
+// (gh api, not gh pr edit: gh pr edit fails on this repo with a classic-projects error.)
+function publish(n, s) {
+  const todo = unpublished(s.proofs || [], s.posted, !!s.pr);
+  if (!s.pr || !todo.length) return;
+  writeFileSync(join(HOME, `${n}-pr-body.md`), prBody(n, s));
+  write(`update PR #${s.pr}'s description`, () => gh('api', '-X', 'PATCH', `repos/${REPO}/pulls/${s.pr}`, '-F', `body=@${join(HOME, `${n}-pr-body.md`)}`, '--jq', '.number'));
+  for (const p of todo) comment(s.pr, p);   // a PR is an issue, so this is the same call as ticket comments
+  s.posted = s.proofs.length; save(n, s);   // in a dry run this is the copy of the state
+  event(n, `published ${todo.length} proof${todo.length > 1 ? 's' : ''} on PR #${s.pr}`);
 }
 
 // The review, from Qodo and the owner only, written to .agent/review.md for the agent to read.
@@ -298,12 +312,15 @@ function refuse(n, t, e) {
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 function continueRun(n, s) {
   for (;;) {
+    publish(n, s);   // anything pushed but not posted yet (after a crash or a retry)
     const asks = ownerAsks(s), q = qodoReview(s.pr);
     if (asks.length) {
-      if (s.commentRounds >= LIMITS.commentRounds) throw new Stop(`The /agent comment limit (${LIMITS.commentRounds}) is used up.`);
-      s.commentRounds++; s.lastAsk = asks.at(-1).id; save(n, s);
+      const asked = asks.map((a) => parseAsk(a.body)), told = asked.filter((a) => roundKind(a) === 'instruction');
+      if (told.length && s.commentRounds >= LIMITS.commentRounds) throw new Stop(`The /agent instruction limit (${LIMITS.commentRounds}) is used up.`);
+      if (!told.length && (s.retryRounds || 0) >= LIMITS.retryRounds) throw new Stop(`The /agent retry limit (${LIMITS.retryRounds}) is used up.`);
+      if (told.length) s.commentRounds++; else s.retryRounds = (s.retryRounds || 0) + 1;
+      s.lastAsk = asks.at(-1).id; save(n, s);
       event(n, `owner asked on PR #${s.pr}: ${asks.map((a) => a.body.slice(7, 80)).join(' | ')}`);
-      const asked = asks.map((a) => parseAsk(a.body)), told = asked.filter((a) => !a.retry);
       if (!told.length) {   // only /agent retry: the runner was wrong, so re-check without an agent run
         if (retryPlan(head(s), s.head) === 'push') checkAndPush(n, s, 'owner retry');
         else { s.pushedAt = Date.now(); save(n, s); event(n, `owner retry: nothing new to push, waiting for Qodo's review of ${s.head.slice(0, 7)} again`); }
@@ -319,6 +336,7 @@ function continueRun(n, s) {
       checkAndPush(n, s, 'owner comment');
     } else if (!q || q.reviewed !== s.head) {
       if ((Date.now() - s.pushedAt) / 60000 > LIMITS.reviewWaitMin) throw new Stop(`Qodo hasn't reviewed ${s.head.slice(0, 7)} after ${LIMITS.reviewWaitMin} min.`);
+      if (DRY) { console.log(`DRY RUN would wait for Qodo's review of ${s.head.slice(0, 7)} (reviewed so far: ${q?.reviewed?.slice(0, 7) ?? 'none'})`); process.exit(0); }
       sleep(LIMITS.reviewPollSec * 1000);
     } else if (!q.open.length) {
       event(n, `Qodo reviewed ${s.head.slice(0, 7)} ${Math.round((Date.now() - s.pushedAt) / 1000)} s after the push: no open findings`);
