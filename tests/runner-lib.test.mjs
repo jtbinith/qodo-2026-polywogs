@@ -54,10 +54,10 @@ test('a retry pushes only when there is something new, otherwise it waits for Qo
   assert.equal(lib.retryPlan?.('abc1234', 'def5678'), 'push');
   assert.equal(lib.retryPlan?.('abc1234', 'abc1234'), 'wait');
 });
-test('a retry sent with an instruction still counts when the agent commits nothing (Qodo on 22477f8)', () => {
+test('an /agent instruction the agent makes no change for stops and asks the owner, retry or not (Qodo on 0191b36)', () => {
   const plan = (o) => lib.afterOwnerRound?.(o);
-  assert.equal(plan({ committed: true, retryAsked: true, head: 'b', pushed: 'a' }), 'check');
-  assert.equal(plan({ committed: false, retryAsked: true, head: 'a', pushed: 'a' }), 'wait');    // nothing new: wait for Qodo, don't stop
-  assert.equal(plan({ committed: false, retryAsked: true, head: 'b', pushed: 'a' }), 'check');   // unpushed commits: check and push them
-  assert.equal(plan({ committed: false, retryAsked: false, head: 'a', pushed: 'a' }), 'check');  // no retry: the checks stop it (no new commits)
+  assert.equal(plan({ committed: true, retryAsked: true }), 'check');
+  assert.equal(plan({ committed: true, retryAsked: false }), 'check');
+  assert.equal(plan({ committed: false, retryAsked: true }), 'stop');    // not 'wait': that could mark the run done with the request undone
+  assert.equal(plan({ committed: false, retryAsked: false }), 'stop');
 });
