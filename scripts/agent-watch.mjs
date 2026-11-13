@@ -138,7 +138,10 @@ for (const tool of ['node', 'npm', 'npx']) writeFileSync(join(BIN, tool), `#!/bi
 }
 const TOOLS = 'Read,Edit,Write,Glob,Grep,Bash,Skill';
 const ALLOW = ['Skill',   // Read, Glob, Grep and Edit are allowed only inside the worktree (in agent())
-  'Bash(npm test:*)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(node tests/:*)',
+  // A prefix rule only matches when a space follows the prefix ("npm run test:*" never matched
+  // "npm run test:unit"), so test commands that don't take arguments are listed exactly.
+  'Bash(npm test:*)', 'Bash(npm run test:unit)', 'Bash(npm run test:browsers)', 'Bash(node --test:*)',
+  'Bash(node tests/two-browser.mjs)', 'Bash(node tests/two-browser.mjs --relay)',
   'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git commit:*)'];
 const DENY = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git reset:*)', 'Bash(git remote:*)', 'Bash(gh:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(ssh:*)', 'WebFetch', 'WebSearch'];
 class Stop extends Error {}
