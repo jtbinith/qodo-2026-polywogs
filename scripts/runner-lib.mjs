@@ -97,9 +97,17 @@ export const afterOwnerRound = ({ committed }) => (committed ? 'check' : 'stop')
 // before a fix-tests run, so it's only cleared when the owner reopens a run.
 export const staleFiles = (when) => (when === 'reopen' ? ['stop.md', 'test-output.txt'] : ['stop.md']);
 
-// Proofs pushed but not yet posted on the PR. A run saved before this was tracked has no count:
-// its first proof went into the PR description when the PR was opened, so only later ones are missing.
-export const unpublished = (proofs, posted, hasPr) => proofs.slice(posted ?? (hasPr ? 1 : 0));
+// What to publish, read from the PR itself rather than from a count, so a run saved by an older
+// runner or a post interrupted halfway is never repeated. Every proof goes in the description; each
+// one after the first (which the PR opened with) is also posted as a comment. A proof is found by
+// its first line, which names its commit range.
+export function publishPlan(proofs, prBody, commentBodies) {
+  const head = (p) => p.split('\n')[0];
+  return {
+    updateBody: proofs.some((p) => !(prBody || '').includes(head(p))),
+    comment: proofs.slice(1).filter((p) => !commentBodies.some((b) => b.startsWith(head(p)))),
+  };
+}
 
 // Reads a paged GitHub list to the end (pages of 100), so nothing past the first page is missed.
 export function allPages(fetchPage) {
@@ -110,3 +118,14 @@ export function allPages(fetchPage) {
 // /agent retry only re-runs the runner's checks (no agent), so it has its own limit and doesn't
 // use up the rounds for instructions.
 export const roundKind = (ask) => (ask.retry ? 'retry' : 'instruction');
+
+// How a batch of /agent comments is spent. The batch is always marked read (consume), even when a
+// limit is reached, or the same comment would reopen and stop the run on every tick. Limits count
+// rounds of work: one batch is one round, so retries queued together cost one retry.
+export function askPlan({ asked, commentRounds, retryRounds, limits }) {
+  const kind = asked.some((a) => roundKind(a) === 'instruction') ? 'instruction' : 'retry';
+  const r = { consume: true, kind, commentRounds, retryRounds };
+  if (kind === 'instruction' && commentRounds >= limits.commentRounds) return { ...r, stop: `The /agent instruction limit (${limits.commentRounds}) is used up.` };
+  if (kind === 'retry' && retryRounds >= limits.retryRounds) return { ...r, stop: `The /agent retry limit (${limits.retryRounds}) is used up.` };
+  return kind === 'instruction' ? { ...r, commentRounds: commentRounds + 1 } : { ...r, retryRounds: retryRounds + 1 };
+}

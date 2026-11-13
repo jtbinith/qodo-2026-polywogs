@@ -18,7 +18,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, symlinkSync, openSync, closeSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound, staleFiles, unpublished, allPages, roundKind } from './runner-lib.mjs';
+import { testNames as namesInDiff, assertionFailures, decodeEntities, parseAsk, retryPlan, afterOwnerRound, staleFiles, publishPlan, allPages, askPlan } from './runner-lib.mjs';
 
 // Measured on PRs #39-#47: Qodo's first review took 0:25-3:19, re-reviews about 1 min.
 const LIMITS = {
@@ -38,6 +38,7 @@ const MAIN = join(homedir(), 'qodo-hack-2026');
 // push instead of doing it, and stops before any agent run or wait: the runner rehearsed, read-only.
 const HOME = process.env.QODO_STATE || join(homedir(), '.local/state/qodo-agent'), WORK = join(homedir(), 'qodo-agent');
 const DRY = process.env.QODO_DRY_RUN === '1';
+if (DRY && !process.env.QODO_STATE) { console.error('A dry run needs QODO_STATE pointing at a copy of the state, so it can never change the live one.'); process.exit(2); }
 const L = { ready: 'ready-for-agent', working: 'agent-working', done: 'agent-done', help: 'agent-needs-help', manual: 'needs-manual-check',
   blocked: 'agent-refused: blocked', notOwner: 'agent-refused: not owner\'s ticket' };
 // paths the agent must never change: the factory itself
@@ -264,7 +265,7 @@ function checkAndPush(n, s, why) {
   if (!s.pr) {
     writeFileSync(join(HOME, `${n}-pr-body.md`), prBody(n, s));
     const url = write(`open a PR from ${s.branch}`, () => gh('pr', 'create', '-R', REPO, '--head', s.branch, '--base', 'main', '--title', agentFile(s, 'pr-title.txt').trim() || `Ticket #${n}`, '--body-file', join(HOME, `${n}-pr-body.md`)), 'https://github.com/x/pull/0');
-    s.pr = Number(url.split('/').pop()); s.posted = s.proofs.length;
+    s.pr = Number(url.split('/').pop());
     event(n, `pushed ${pushed.slice(0, 7)} and opened PR #${s.pr} (${why})`);
   } else event(n, `pushed ${pushed.slice(0, 7)} to PR #${s.pr} (${why})`);
   s.phase = 'review'; save(n, s);
@@ -278,13 +279,16 @@ const prBody = (n, s) => (agentFile(s, 'pr-body.md') || `Closes #${n}`) + '\n\n'
 // It's resumable: a crash between push and post is caught up on the next step or /agent retry.
 // (gh api, not gh pr edit: gh pr edit fails on this repo with a classic-projects error.)
 function publish(n, s) {
-  const todo = unpublished(s.proofs || [], s.posted, !!s.pr);
-  if (!s.pr || !todo.length) return;
-  writeFileSync(join(HOME, `${n}-pr-body.md`), prBody(n, s));
-  write(`update PR #${s.pr}'s description`, () => gh('api', '-X', 'PATCH', `repos/${REPO}/pulls/${s.pr}`, '-F', `body=@${join(HOME, `${n}-pr-body.md`)}`, '--jq', '.number'));
-  for (const p of todo) comment(s.pr, p);   // a PR is an issue, so this is the same call as ticket comments
-  s.posted = s.proofs.length; save(n, s);   // in a dry run this is the copy of the state
-  event(n, `published ${todo.length} proof${todo.length > 1 ? 's' : ''} on PR #${s.pr}`);
+  if (!s.pr || !(s.proofs || []).length) return;
+  const prBodyNow = ghJson('api', `repos/${REPO}/pulls/${s.pr}`).body || '';
+  const posted = issueComments(s.pr).filter((c) => c.user.login === OWNER).map((c) => c.body);
+  const plan = publishPlan(s.proofs, prBodyNow, posted);
+  if (plan.updateBody) {
+    writeFileSync(join(HOME, `${n}-pr-body.md`), prBody(n, s));
+    write(`update PR #${s.pr}'s description`, () => gh('api', '-X', 'PATCH', `repos/${REPO}/pulls/${s.pr}`, '-F', `body=@${join(HOME, `${n}-pr-body.md`)}`, '--jq', '.number'));
+  }
+  for (const p of plan.comment) comment(s.pr, p);   // a PR is an issue, so this is the same call as ticket comments
+  if (plan.updateBody || plan.comment.length) event(n, `published on PR #${s.pr}: ${plan.updateBody ? 'description' : ''}${plan.updateBody && plan.comment.length ? ' and ' : ''}${plan.comment.length ? `${plan.comment.length} proof comment${plan.comment.length > 1 ? 's' : ''}` : ''}`);
 }
 
 // The review, from Qodo and the owner only, written to .agent/review.md for the agent to read.
@@ -315,12 +319,12 @@ function continueRun(n, s) {
     publish(n, s);   // anything pushed but not posted yet (after a crash or a retry)
     const asks = ownerAsks(s), q = qodoReview(s.pr);
     if (asks.length) {
-      const asked = asks.map((a) => parseAsk(a.body)), told = asked.filter((a) => roundKind(a) === 'instruction');
-      if (told.length && s.commentRounds >= LIMITS.commentRounds) throw new Stop(`The /agent instruction limit (${LIMITS.commentRounds}) is used up.`);
-      if (!told.length && (s.retryRounds || 0) >= LIMITS.retryRounds) throw new Stop(`The /agent retry limit (${LIMITS.retryRounds}) is used up.`);
-      if (told.length) s.commentRounds++; else s.retryRounds = (s.retryRounds || 0) + 1;
-      s.lastAsk = asks.at(-1).id; save(n, s);
+      const asked = asks.map((a) => parseAsk(a.body));
+      const plan = askPlan({ asked, commentRounds: s.commentRounds, retryRounds: s.retryRounds || 0, limits: LIMITS });
+      s.lastAsk = asks.at(-1).id; s.commentRounds = plan.commentRounds; s.retryRounds = plan.retryRounds; save(n, s);   // read first, even over a limit
       event(n, `owner asked on PR #${s.pr}: ${asks.map((a) => a.body.slice(7, 80)).join(' | ')}`);
+      if (plan.stop) throw new Stop(plan.stop);
+      const told = asked.filter((a) => !a.retry);
       if (!told.length) {   // only /agent retry: the runner was wrong, so re-check without an agent run
         if (retryPlan(head(s), s.head) === 'push') checkAndPush(n, s, 'owner retry');
         else { s.waitFrom = Date.now(); save(n, s); event(n, `owner retry: nothing new to push, waiting for Qodo's review of ${s.head.slice(0, 7)} again`); }   // pushedAt stays: it times Qodo's review
@@ -395,6 +399,7 @@ try {
     const refusal = t.user.login !== OWNER ? new Refuse(L.notOwner, `#${n} was written by ${t.user.login}, not ${OWNER}. The factory only works the owner's tickets.`)
       : blockers.length ? new Refuse(L.blocked, `#${n} is blocked by ${blockers.map((b) => '#' + b.number).join(', ')}, which ${blockers.length > 1 ? 'are' : 'is'} still open. Nothing was started.`) : null;
     if (refusal) { refuse(n, t, refusal); continue; }   // the next ticket can still start this tick
+    if (DRY) { console.log(`DRY RUN would pick up #${n} (${title}) and set up its worktree. Stopping here.`); process.exit(0); }
     current = { n, s: null };
     const slug = title.toLowerCase().replace(/^[^·]*·\s*/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     let branch = `agent/${n}-${slug}`;
