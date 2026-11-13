@@ -247,10 +247,10 @@ function screenAt(x, y) {
   }
   return null;
 }
+const onMyScreen = (p) => { const [x, y] = world(p); return screenAt(x + p.w / 2, y + p.h / 2) === id; };
 function dropped(p) {
   // landed on my screen and I don't have it yet: ask the owner for the full photo
-  const [x, y] = world(p);
-  if (screenAt(x + p.w / 2, y + p.h / 2) === id && !files.has(p.pid) && !incoming.has(p.pid)) {
+  if (onMyScreen(p) && !files.has(p.pid) && !incoming.has(p.pid)) {
     const src = p.holders.find((k) => k !== id && net.peers[k]) || p.owner;
     p.lastSource = src;
     expect(p.pid, src, p.size);
@@ -298,7 +298,12 @@ cv.addEventListener('pointerup', (e) => {
 // Saving must happen inside the tap, with the file already in hand (iOS rule).
 function save(p) {
   const file = files.get(p.pid);
-  if (!file) return toast(p.owner === id ? 'Yours' : 'Drag it onto your screen first');
+  if (!file) {
+    if (p.owner === id) return toast('Yours');
+    if (incoming.has(p.pid)) return toast('Receiving…');   // already asked: don't ask twice
+    if (onMyScreen(p)) return dropped(p);                  // on my screen: a tap fetches it, like a drop (C6)
+    return toast('Drag it onto your screen first');
+  }
   if (p.owner === id) return toast('Already yours');
   if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file] }).catch(() => {});
   else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); }
