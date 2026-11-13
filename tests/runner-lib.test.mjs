@@ -65,3 +65,17 @@ test('an old stop file is cleared before each agent run and when the owner reope
   assert.deepEqual(lib.staleFiles?.('agent-run'), ['stop.md']);                       // test-output.txt is written just before a fix-tests run, so it stays
   assert.deepEqual(lib.staleFiles?.('reopen'), ['stop.md', 'test-output.txt']);
 });
+test('proofs not yet posted are found, including on a run saved before this was tracked (#41 at 09:51)', () => {
+  assert.deepEqual(lib.unpublished?.(['p1', 'p2'], 1), ['p2']);
+  assert.deepEqual(lib.unpublished?.(['p1', 'p2'], 2), []);
+  assert.deepEqual(lib.unpublished?.(['p1', 'p2'], undefined, true), ['p2']);   // an older run: its first proof went into the PR when it was opened
+  assert.deepEqual(lib.unpublished?.(['p1'], undefined, false), ['p1']);
+});
+test('every page is read, so a list past 100 is complete', () => {
+  const pages = { 1: Array(100).fill('a'), 2: Array(100).fill('b'), 3: ['c'] };
+  assert.equal(lib.allPages?.((p) => pages[p] || []).length, 201);
+});
+test('a retry has its own limit, separate from instructions', () => {
+  assert.equal(lib.roundKind?.({ retry: true }), 'retry');
+  assert.equal(lib.roundKind?.({ retry: false, text: 'x' }), 'instruction');
+});
