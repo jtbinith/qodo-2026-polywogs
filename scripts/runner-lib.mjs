@@ -91,3 +91,8 @@ export const retryPlan = (head, pushed) => (head !== pushed ? 'push' : 'wait');
 // that's its verdict on the request ("already done", "not safe"), so the run stops and asks the
 // owner, even if a retry came with it: waiting here could mark the run done with the request undone.
 export const afterOwnerRound = ({ committed }) => (committed ? 'check' : 'stop');
+
+// Files in .agent/ that describe the last run and must go before the next one: a stop file left by
+// an earlier agent run would otherwise stop the next round at once. test-output.txt is written just
+// before a fix-tests run, so it's only cleared when the owner reopens a run.
+export const staleFiles = (when) => (when === 'reopen' ? ['stop.md', 'test-output.txt'] : ['stop.md']);
