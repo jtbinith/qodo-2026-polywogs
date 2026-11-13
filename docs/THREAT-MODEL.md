@@ -84,7 +84,7 @@ Anything that crosses into a device from the room or the server is untrusted. Th
 | T-I5 | Learn where a photo was taken | Read GPS and camera details | A1 | H | H | S6: JPEG metadata removed before sending unless the sender keeps it. Other files (HEIC, PNG, WebP, video) are sent with a warning. Checked on a real iPhone: the picker's JPEGs keep GPS. S6 removes it | S17 (other formats) |
 | T-I6 | Learn someone's IP address | Read it from direct connection setup | A1 | H | L | | OQ1 |
 | T-I7 | Return later with an old link | Use a room code after the room is over | A1 | M | M | | S11 |
-| T-I8 | Find files left on a shared computer | Use the browser after someone leaves | A6 | M | M | | S13 |
+| T-I8 | Find files left on a shared computer | Use the browser after someone leaves | A6 | M | M | Received files are only ever held in memory | S13 (Leave clears memory and the tab's stored keys). S18 keeps keys, never received files, on disk, and deletes them at the next start-up at the latest |
 | T-I9 | Learn from filenames | Read names such as "passport-scan.pdf" before anything downloads | A1 | M | M | | OQ5 |
 | T-I10 | Server learns who talks to whom | Observe setup messages, names and screen sizes | A3 | H | L | Accepted. Listed as "allowed in the clear" in AGENTS.md. No content or keys | |
 | T-I11 | Room links leak | Codes in the address bar end up in browser history, screenshots and shared screens | A1, A6 | M | M | Codes are unguessable (C1) | S11, S16, S4 |

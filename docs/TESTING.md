@@ -57,7 +57,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | S4 | Integration | A device the host hasn't accepted receives nothing (to write) |
 | S9 | Integration, Acceptance | A blocked device's prints disappear. A stranger's thumbnail is blurred (to write) |
 | S11 | Integration | A room's code stops working 30 minutes after the last device leaves (to write) |
-| S13 | System | After Leave, no received file or thumbnail is left in memory (to write) |
+| S13 | System | After Leave, no received file or thumbnail is left in memory and the tab's keys are gone from IndexedDB (to write) |
 | S14 | Unit, System | `tests/thumb.test.mjs`: a thumbnail over 400 × 400 pixels, whose size can't be read or with bytes after its end marker is not decoded. The two-browser test sends 400 × 400, 401 × 400, a 30000 × 30000 image bomb and a 400 × 400 with 30000 bytes after its end: only the first is decoded, the others show a plain card (exists) |
 | S15 | Acceptance | The site loaded inside another site's frame refuses to run (manual) |
 | S16 | System | The room code is gone from the address bar after joining (to write) |
@@ -72,7 +72,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | F16 | System | A drag ended by `pointercancel` puts the print back. A print pushed past the screen edge keeps 40 px on screen. A print dropped across a shared edge ends fully on one screen (to write) |
 | F17 | System | Click, move, click moves a print with no button held. Esc puts it back (to write) |
 | F18 | Acceptance | On a real iPhone and Android phone, using the site never triggers a back swipe, a pull-down panel or the home bar (manual) |
-| S18 | System | Reloading a joined device mid-transfer keeps its id, name and join. The transfer finishes. A duplicated tab gets a new id (to write) |
+| S18 | System | Reloading a joined device mid-transfer keeps its id, name and join, and the transfer restarts and finishes. No received bytes are in IndexedDB. A duplicated tab gets a new id. After a tab closes, the next start-up deletes its stored keys (to write) |
 | S19 | Unit | A table of names: "Sam" clashes with "sam", "SAM", "Ｓａｍ" and " Sam "; "José" clashes with "Jose"; "Sam M" doesn't clash with "Sam"; names with a zero-width space, a text-direction override, mixed scripts or 25 characters are refused; "👩‍👩‍👧" counts as one character (to write) |
 | S20 | System | With "Remember this device" on, a reload in a new tab shows "seen before" to the other device. A different device using the same name shows "new device". Forget clears both (to write) |
 | R1–R4 | System | Chaos runs of the browser test: a share of relay frames dropped, a holder stopped halfway, a device delayed, a piece corrupted. Each must still end with the right SHA-256. Results go to the R4 dashboard (later) |

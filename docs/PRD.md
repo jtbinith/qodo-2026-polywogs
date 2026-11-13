@@ -147,7 +147,7 @@ Priorities use MoSCoW: **M**ust, **S**hould, **C**ould.
 | US20 | As a receiver, I want to save every photo I've received in one tap so that I don't save them one by one | S | F13 |
 | US21 | As anyone in a room, I want to see whether a device is one I've seen before so that I notice when someone new uses a friend's name | C | S20 |
 | US22 | As anyone joining, I want to be told if my name is already taken so that nobody mixes me up with someone else | S | S19 |
-| US23 | As someone whose page reloads, I want to come back as the same device so that my joins and transfers carry on | S | S18 |
+| US23 | As someone whose page reloads, I want to come back as the same device so that my joins carry on and transfers restart by themselves | S | S18 |
 | US24 | As anyone dragging, I want a print never to get stuck at the edge of a screen so that I can always pick it up again | S | F16 |
 | US25 | As a laptop user, I want to pick a print up with one click and drop it with another so that I don't have to hold the trackpad down | S | F17 |
 
@@ -177,7 +177,7 @@ Priorities use MoSCoW: **M**ust, **S**hould, **C**ould.
 | US21 | A device that turned on "Remember this device" and was seen yesterday | It joins today with the same name | It shows "seen before" |
 | US21 | A remembered name | A different device joins with that name in another room | It shows "new device" |
 | US22 | Someone called "Sam" in the room | A new device types "sam", "SAM" or "Ｓａｍ" | It sees "Someone in this room is already called Sam" and can't join until the name is different. No name is suggested |
-| US23 | A device joined to another screen and halfway through a transfer | Its page reloads | It comes back with the same id, name and colour, still joined. The transfer carries on |
+| US23 | A device joined to another screen and halfway through a transfer | Its page reloads | It comes back with the same id, name and colour, still joined. The transfer starts again by itself and finishes. Nothing it had received was written to disk |
 | US24 | A print being dragged | The phone takes over the gesture (the drag is cancelled) | The print goes back to where the drag started |
 | US25 | A laptop with a print on screen | The user clicks the print, moves the pointer and clicks again | The print moves without the button being held. Esc puts it back |
 
@@ -252,11 +252,11 @@ Each of these answers a threat in the [threat model](THREAT-MODEL.md).
 | S10 | Only the people a file was shared with can download it | S | US15 |
 | S11 | Rooms expire | S | A room with nobody in it for 30 minutes closes. Its code no longer works |
 | S12 | Links and text from other devices are always shown as plain text. Must before F7 or F9 ships | M | A link or text containing HTML or script shows as characters and runs nothing. A content security policy blocks inline scripts |
-| S13 | Leave and clear | S | "Leave" removes every received file and thumbnail from memory and closes all links |
+| S13 | Leave and clear | S | "Leave" removes every received file and thumbnail from memory, deletes the tab's stored keys (S18) and closes all links. Received files are never written to disk. Keys left behind by a tab that closed without Leave are deleted at the next start-up of the site |
 | S14 | Thumbnails from other devices are checked for size in pixels before they are decoded | M | A thumbnail over 400 × 400 pixels is not decoded and the print shows a plain card. Full files are never decoded on arrival. They can still be sent and saved at any size up to C14's limit |
 | S15 | The site cannot be framed by another site | S | Frame-busting code stops the site running inside another site's frame. GitHub Pages cannot send a frame-blocking header. This is the workaround |
 | S16 | Room links leak less | C | The room code is removed from the address bar after joining. It isn't left in browser history. An Invite button shows the full link and a QR code (including the host fingerprint) so others can still join |
-| S18 | A reload is the same device coming back | S | US23. The device id, name and keys last for the tab's lifetime: they survive a reload and are gone when the tab closes. A duplicated tab that turns up with the same id makes itself a new one. Received pieces are kept so transfers carry on |
+| S18 | A reload is the same device coming back | S | US23. The device id, name and keys last for the tab's lifetime: they survive a reload and are gone when the tab closes. A duplicated tab makes itself a new device (it can't take the original tab's lock on its id). Received files and pieces stay in memory only, as before: after a reload, unfinished transfers start again by themselves from a holder. The stored keys are deleted when the tab closes, at the latest at the next start-up of the site (S13) |
 | S19 | Names are unique in a room | S | US22. Names are compared by a name key: Unicode NFKC, accents removed, case folded, spaces trimmed and collapsed. A name is refused if it contains invisible or control characters (including text-direction overrides), mixes scripts or is longer than 24 characters as seen on screen. A taken name shows "Someone in this room is already called Sam". Nothing is suggested: the person chooses. If two devices pick a name at the same moment, the time keeper keeps the first |
 | S20 | Remembered devices (trust on first use) | C | US21. Off by default. "Remember this device so friends recognise it" keeps the device's signing key in the browser. Other devices that saw it before then show "seen before". A known name on a different key shows "new device". "Forget" deletes the key and every remembered device. Nothing is stored on the server |
 
