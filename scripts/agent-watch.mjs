@@ -290,6 +290,9 @@ function refuse(n, t, e) {
 // ---- one step per tick ----
 let current = null;
 try {
+  // the labels must exist before the owner can apply ready-for-agent: create them on the first run
+  const LABELS_OK = join(HOME, 'labels-ok');
+  if (!existsSync(LABELS_OK)) { ensureLabels(); writeFileSync(LABELS_OK, now()); }
   const working = ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.working, '--json', 'number');
   if (working.length) {
     const n = working[0].number, s = load(n); current = { n, s };
@@ -321,7 +324,6 @@ try {
   }
 
   const ready = ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.ready, '--json', 'number,title').sort((a, b) => a.number - b.number);
-  if (ready.length) ensureLabels();
   for (const { number: n, title } of ready) {
     if (Date.now() - (skipped()[n] || 0) < 3600000) continue;
     if (!labelledByOwner(n)) { event(n, `ignored: ${L.ready} wasn't added by ${OWNER}`); continue; }
