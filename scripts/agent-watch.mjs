@@ -73,6 +73,19 @@ function labelledByOwner(n) {
 }
 const setLabels = (n, add, remove) => gh('issue', 'edit', String(n), '-R', REPO, ...add.flatMap((l) => ['--add-label', l]), ...remove.flatMap((l) => ['--remove-label', l]));
 const comment = (n, body) => gh('issue', 'comment', String(n), '-R', REPO, '--body', body);
+const LABEL_INFO = {
+  [L.ready]: ['0e8a16', 'Owner only: the factory works this ticket unattended'], [L.working]: ['fbca04', 'The factory is working this ticket'],
+  [L.done]: ['1d76db', 'The factory finished; waiting for the owner to merge'], [L.help]: ['d93f0b', 'The factory stopped and needs the owner'],
+  [L.blocked]: ['5319e7', "Refused before starting: an issue it's blocked by is still open"], [L.notOwner]: ['5319e7', "Refused before starting: the ticket wasn't written by the owner"],
+};
+function ensureLabels() {   // a fresh repo has none of these: create what's missing before using any
+  const have = ghJson('label', 'list', '-R', REPO, '--limit', '200', '--json', 'name').map((l) => l.name);
+  for (const [name, [color, desc]] of Object.entries(LABEL_INFO)) if (!have.includes(name)) gh('label', 'create', name, '-R', REPO, '--color', color, '--description', desc);
+}
+// a ticket whose refusal couldn't be reported is skipped for an hour, so it can't block the queue
+const SKIP = join(HOME, 'skip.json');
+const skipped = () => existsSync(SKIP) ? JSON.parse(readFileSync(SKIP, 'utf8')) : {};
+const skip = (n) => writeFileSync(SKIP, JSON.stringify({ ...skipped(), [n]: Date.now() }));
 function moveCard(n, column) {
   try {
     const P = gh('project', 'view', '7', '--owner', OWNER, '--format', 'json', '-q', '.id');
@@ -263,6 +276,17 @@ function writeReview(s, q, asks) {
     (asks.length ? `## From jtbinith (/agent)\n${asks.map((a) => a.body.slice(7)).join('\n\n')}\n` : ''));
 }
 
+function refuse(n, t, e) {
+  try {
+    setLabels(n, [e.label], [L.ready, L.help, L.done].filter((l) => t.labels.some((x) => x.name === l)));
+    comment(n, `**Factory refused this ticket before starting.** ${e.message}\n\nRemove the reason and label it \`${L.ready}\` again to retry.`);
+    event(n, `refused (${e.label}): ${e.message}`); notify(`#${n}: refused. ${e.message}`);
+  } catch (e2) {
+    skip(n); event(n, `couldn't report the refusal, skipping it for an hour: ${e2.message.split('\n')[0]}`);
+    notify(`#${n}: refused (${e.label}), but the label couldn't be set. Skipped for an hour.`);
+  }
+}
+
 // ---- one step per tick ----
 let current = null;
 try {
@@ -297,15 +321,18 @@ try {
   }
 
   const ready = ghJson('issue', 'list', '-R', REPO, '--state', 'open', '--label', L.ready, '--json', 'number,title').sort((a, b) => a.number - b.number);
+  if (ready.length) ensureLabels();
   for (const { number: n, title } of ready) {
+    if (Date.now() - (skipped()[n] || 0) < 3600000) continue;
     if (!labelledByOwner(n)) { event(n, `ignored: ${L.ready} wasn't added by ${OWNER}`); continue; }
     const openPrs = ghJson('pr', 'list', '-R', REPO, '--state', 'open', '--json', 'number');
     if (openPrs.length) { event(n, `waiting: PR #${openPrs[0].number} is still open`); break; }
-    current = { n, s: null };
     const t = issue(n);
-    if (t.user.login !== OWNER) throw new Refuse(L.notOwner, `#${n} was written by ${t.user.login}, not ${OWNER}. The factory only works the owner's tickets.`);
     const blockers = ghJson('api', `repos/${REPO}/issues/${n}/dependencies/blocked_by`).filter((b) => b.state === 'open');
-    if (blockers.length) throw new Refuse(L.blocked, `#${n} is blocked by ${blockers.map((b) => '#' + b.number).join(', ')}, which ${blockers.length > 1 ? 'are' : 'is'} still open. Nothing was started.`);
+    const refusal = t.user.login !== OWNER ? new Refuse(L.notOwner, `#${n} was written by ${t.user.login}, not ${OWNER}. The factory only works the owner's tickets.`)
+      : blockers.length ? new Refuse(L.blocked, `#${n} is blocked by ${blockers.map((b) => '#' + b.number).join(', ')}, which ${blockers.length > 1 ? 'are' : 'is'} still open. Nothing was started.`) : null;
+    if (refusal) { refuse(n, t, refusal); continue; }   // the next ticket can still start this tick
+    current = { n, s: null };
     const slug = title.toLowerCase().replace(/^[^·]*·\s*/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     let branch = `agent/${n}-${slug}`;
     for (let k = 2; sh('git', ['ls-remote', '--heads', 'origin', branch], { cwd: MAIN }); k++) branch = `agent/${n}-${slug}-${k}`;   // a re-run gets a new branch
@@ -327,15 +354,6 @@ try {
   }
 } catch (e) {
   if (!current) throw e;
-  if (e instanceof Refuse) {
-    try {
-      const has = issue(current.n).labels.map((l) => l.name);
-      setLabels(current.n, [e.label], [L.ready, L.help, L.done].filter((l) => has.includes(l)));
-      comment(current.n, `**Factory refused this ticket before starting.** ${e.message}\n\nRemove the reason and label it \`${L.ready}\` again to retry.`);
-      event(current.n, `refused (${e.label}): ${e.message}`); notify(`#${current.n}: refused. ${e.message}`);
-    } catch (e2) { event(current.n, `couldn't report the refusal: ${e2.message.split('\n')[0]}`); }
-    process.exit(0);
-  }
   const why = e instanceof Stop ? e.message : `The runner crashed: ${e.message.split('\n').slice(0, 6).join('\n')}`;
   try { stop(current.n, current.s, L.help, why); } catch (e2) { event(current.n, `couldn't report the stop: ${e2.message.split('\n')[0]}`); notify(`#${current.n}: runner failed`); }
 }
