@@ -3,8 +3,10 @@ Description=Qodo factory: one step of the ticket loop (scripts/agent-watch.mjs)
 
 [Service]
 Type=oneshot
-# a run can last a while: it waits for Qodo and the agent inside one start
-TimeoutStartSec=infinity
+# a run waits for Qodo and the agent inside one start. The worst legitimate run is about 17 h
+# (7 pushes, each up to 2 agent runs of 45 min plus tests), so only a hang reaches 24 h. If it's
+# killed, the next tick finds the ticket mid-run and stops it with agent-needs-help.
+TimeoutStartSec=24h
 WorkingDirectory=%h/qodo-hack-2026
 # node and claude live under the home directory, not in systemd's default PATH
 Environment=PATH=%h/.nvm/versions/node/v25.2.1/bin:%h/.toolbox/bin:/usr/local/bin:/usr/bin:/bin

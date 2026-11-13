@@ -28,6 +28,7 @@ const LIMITS = {
   reviewPollSec: 30,        // how often to look for Qodo's review while waiting (re-reviews take about 1 min)
   agentRunMin: 45,          // one subagent run
   testRunMin: 15,           // one `npm test`
+  commandMin: 5,            // one gh or git command
 };
 const REPO = 'jtbinith/qodo-hack-2026', OWNER = 'jtbinith', QODO = 'qodo-code-review[bot]';
 const MAIN = join(homedir(), 'qodo-hack-2026');
@@ -39,8 +40,9 @@ const GUARDED = [/^package(-lock)?\.json$/, /^scripts\//, /^\.claude\//, /^\.git
 mkdirSync(join(HOME, 'logs'), { recursive: true }); mkdirSync(WORK, { recursive: true });
 
 const now = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-const event = (n, msg) => { const line = `${now()} #${n} ${msg}`; appendFileSync(join(HOME, 'events.log'), line + '\n'); console.log(line); try { writeFileSync(join(HOME, 'lock'), String(Date.now())); } catch {} };   // every event also keeps the lock fresh
-const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
+const event = (n, msg) => { const line = `${now()} #${n} ${msg}`; appendFileSync(join(HOME, 'events.log'), line + '\n'); console.log(line); };
+// every gh and git call has a deadline: a hung network call becomes an error and the run stops with agent-needs-help
+const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: LIMITS.commandMin * 60000, killSignal: 'SIGKILL', ...opts }).trim();
 const gh = (...args) => sh('gh', args);
 const ghJson = (...args) => JSON.parse(gh(...args) || 'null');
 const notify = (msg) => spawnSync('notify-send', ['Qodo factory', msg]);
@@ -49,16 +51,13 @@ const load = (n) => existsSync(stateFile(n)) ? JSON.parse(readFileSync(stateFile
 const save = (n, s) => writeFileSync(stateFile(n), JSON.stringify(s, null, 2));
 const fence = (t) => '```\n' + t.slice(0, 3000) + '\n```';
 
-// one run at a time: a second timer tick while an agent is working just exits
-const LOCK = join(HOME, 'lock');
-let lockFd;
-try { lockFd = openSync(LOCK, 'wx'); } catch {
-  const age = (Date.now() - Number(readFileSync(LOCK, 'utf8') || 0)) / 60000;
-  if (age < LIMITS.agentRunMin + LIMITS.testRunMin * 4) process.exit(0);   // refreshed between steps
-  unlinkSync(LOCK); lockFd = openSync(LOCK, 'wx');                       // left over from a crash
+// One run at a time. The script re-runs itself under flock(1): the kernel holds the lock, a second
+// copy (timer or by hand) exits at once, and the lock goes away with the process, even after a crash.
+if (!process.env.QODO_FLOCKED) {
+  const r = spawnSync('flock', ['-n', '-E', '75', join(HOME, 'run.lock'), process.execPath, process.argv[1], ...process.argv.slice(2)],
+    { stdio: 'inherit', env: { ...process.env, QODO_FLOCKED: '1' } });
+  process.exit(r.status === 75 ? 0 : r.status ?? 1);             // 75: another run holds the lock
 }
-writeFileSync(LOCK, String(Date.now()));
-process.on('exit', () => { try { closeSync(lockFd); unlinkSync(LOCK); } catch {} });
 
 // ---- GitHub, read and written only by the script ----
 const issue = (n) => ghJson('api', `repos/${REPO}/issues/${n}`);
@@ -293,7 +292,6 @@ function refuse(n, t, e) {
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 function continueRun(n, s) {
   for (;;) {
-    writeFileSync(LOCK, String(Date.now()));                     // still alive: keeps the lock fresh
     const asks = ownerAsks(s), q = qodoReview(s.pr);
     if (asks.length) {
       if (s.commentRounds >= LIMITS.commentRounds) throw new Stop(`The /agent comment limit (${LIMITS.commentRounds}) is used up.`);
