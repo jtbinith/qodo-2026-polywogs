@@ -130,7 +130,7 @@ const nameKey = (s) => s.normalize('NFKC').normalize('NFD')
 
 Two kinds of look-alike can't all be caught: look-alikes inside one script ("5am", "rn" for "m") and a name written entirely in another script that happens to look the same (Cyrillic `сор` beside Latin `cop`). Neither can the colour and emoji, which only help honest people tell devices apart. "New device" (S20) and the four words (S3) are what catch a deliberate look-alike.
 
-**Remembered devices (S20).** Off by default. When turned on, the device's signing key is kept in IndexedDB until "Forget". Other devices keep the public keys of devices they've seen, with the name each used, also in IndexedDB. A device whose key is known shows "seen before". A known name on a key that isn't known shows "new device". Nothing about this is sent to the server.
+**Remembered devices (S20).** Off by default and only ever the person's own choice. When turned on, the device's keys are kept in IndexedDB until "Forget", and its presence says `remember: true`. Other devices store the public keys and name only of devices whose presence says `remember: true`, also in IndexedDB. Nobody stores a device that didn't opt in. When a device turns it off or taps Forget, its presence says `remember: false` and devices that see that delete what they stored for it. A device whose key is known shows "seen before". A known name on a key that isn't known shows "new device". Nothing about this is sent to the server.
 
 ## 7. File checks on send and receive
 Where each check sits. Planned steps are marked with their requirement.
