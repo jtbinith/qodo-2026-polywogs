@@ -62,8 +62,10 @@ process.on('exit', () => { try { closeSync(lockFd); unlinkSync(LOCK); } catch {}
 const issue = (n) => ghJson('api', `repos/${REPO}/issues/${n}`);
 const issueComments = (n) => ghJson('api', `repos/${REPO}/issues/${n}/comments?per_page=100`);
 function labelledByOwner(n) {
-  const events = ghJson('api', `repos/${REPO}/issues/${n}/events?per_page=100`).filter((e) => e.event === 'labeled' && e.label?.name === L.ready);
-  return events.length > 0 && events.at(-1).actor.login === OWNER;
+  let events = [];   // every page: the label that counts is the newest one
+  for (let page = 1; ; page++) { const p = ghJson('api', `repos/${REPO}/issues/${n}/events?per_page=100&page=${page}`); events.push(...p); if (p.length < 100) break; }
+  const latest = events.filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === L.ready).at(-1);
+  return latest?.event === 'labeled' && latest.actor.login === OWNER;
 }
 const setLabels = (n, add, remove) => gh('issue', 'edit', String(n), '-R', REPO, ...add.flatMap((l) => ['--add-label', l]), ...remove.flatMap((l) => ['--remove-label', l]));
 const comment = (n, body) => gh('issue', 'comment', String(n), '-R', REPO, '--body', body);
@@ -97,13 +99,26 @@ const footprint = (s) => JSON.stringify({
 });
 
 // ---- the agent: no GitHub, no MCP, no user settings; only file tools, tests and local git ----
-const AGENT_SETTINGS = join(HOME, 'agent-settings.json');
+const AGENT_SETTINGS = join(HOME, 'agent-settings.json'), BIN = join(HOME, 'bin'), SANDBOX = join(HOME, 'sandbox.sh');
+const IMAGE = 'mcr.microsoft.com/playwright:v1.64.1-noble';   // matches package.json's playwright
+// Code the agent writes runs only in a throwaway container that sees the worktree and node_modules:
+// no home directory, so no gh login, SSH keys, AWS or Claude settings. Network stays (the relay test).
+writeFileSync(SANDBOX, `#!/bin/sh
+WD="$(pwd -P)"; NM="${join(MAIN, 'node_modules')}"
+exec docker run --rm -i --init --network bridge --dns 1.1.1.1 --user "$(id -u):$(id -g)" \\
+  --cap-drop ALL --security-opt no-new-privileges --read-only --tmpfs /tmp:exec --shm-size 1g \\
+  -e HOME=/tmp -e CI=1 -v "$WD:$WD" -v "$NM:$NM:ro" -w "$WD" ${IMAGE} "$@"
+`, { mode: 0o755 });
+mkdirSync(BIN, { recursive: true });
+for (const tool of ['node', 'npm', 'npx']) writeFileSync(join(BIN, tool), `#!/bin/sh\nexec ${SANDBOX} ${tool} "$@"\n`, { mode: 0o755 });
 { // sign-in only (Bedrock). No permissions, plugins, hooks or MCP from the user's settings.
   const user = JSON.parse(readFileSync(join(homedir(), '.claude/settings.json'), 'utf8'));
-  writeFileSync(AGENT_SETTINGS, JSON.stringify(Object.fromEntries(['awsCredentialExport', 'env', 'model'].filter((k) => k in user).map((k) => [k, user[k]]))));
+  const keep = Object.fromEntries(['awsCredentialExport', 'env', 'model'].filter((k) => k in user).map((k) => [k, user[k]]));
+  keep.permissions = { deny: ['.ssh', '.config', '.aws', '.claude', '.kiro', '.local', '.midway', '.toolbox', '.gnupg', 'Documents', 'Pictures'].map((d) => `Read(~/${d}/**)`) };
+  writeFileSync(AGENT_SETTINGS, JSON.stringify(keep));
 }
 const TOOLS = 'Read,Edit,Write,Glob,Grep,Bash,Skill';
-const ALLOW = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
+const ALLOW = ['Read', 'Glob', 'Grep', 'Skill',
   'Bash(npm test)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(node tests/:*)',
   'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git add:*)', 'Bash(git commit:*)'];
 const DENY = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git reset:*)', 'Bash(git remote:*)', 'Bash(gh:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(ssh:*)', 'WebFetch', 'WebSearch'];
@@ -112,8 +127,10 @@ function agent(n, s, what, prompt) {
   const log = join(HOME, 'logs', `${n}-${s.runs + 1}-${what}.log`), before = footprint(s), from = head(s);
   event(n, `agent run ${s.runs + 1} (${what}) started`);
   const r = spawnSync('claude', ['-p', prompt, '--setting-sources', 'project', '--settings', AGENT_SETTINGS, '--strict-mcp-config',
-    '--tools', TOOLS, '--allowedTools', ...ALLOW, '--disallowedTools', ...DENY, '--output-format', 'text'],
-    { cwd: s.dir, encoding: 'utf8', timeout: LIMITS.agentRunMin * 60000, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, AGENT_RUN: '1' } });
+    '--tools', TOOLS, '--allowedTools', ...ALLOW, `Edit(/${s.dir}/**)`, '--disallowedTools', ...DENY, '--output-format', 'text'],
+    { cwd: s.dir, encoding: 'utf8', timeout: LIMITS.agentRunMin * 60000, stdio: ['ignore', 'pipe', 'pipe'],
+      // a small environment: the agent's node and npm are the container ones in BIN
+      env: { PATH: `${BIN}:${process.env.PATH}`, HOME: homedir(), USER: process.env.USER || '', LANG: process.env.LANG || 'C.UTF-8', AWS_REGION: process.env.AWS_REGION || '', AGENT_RUN: '1' } });
   writeFileSync(log, `$ claude -p ${JSON.stringify(prompt)}\n\n${r.stdout || ''}\n${r.stderr || ''}\nexit ${r.status}${r.error ? ' ' + r.error.message : ''}\n`);
   s.runs++; save(n, s);
   event(n, `agent run ${s.runs} (${what}) ended: exit ${r.status}${r.error ? ' (' + r.error.code + ')' : ''}`);
@@ -124,12 +141,13 @@ function agent(n, s, what, prompt) {
   const touched = sh('git', ['diff', '--name-only', `${from}..HEAD`], { cwd: s.dir }).split('\n').filter(Boolean);
   const guarded = touched.filter((f) => GUARDED.some((g) => g.test(f)));
   if (guarded.length) throw new Stop(`Agent run ${s.runs} changed files the factory guards: ${guarded.join(', ')}.`);
-  const dirty = sh('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: s.dir }).split('\n').filter((l) => l && !/ \.agent\//.test(l));
-  if (dirty.length) event(n, `uncommitted after run ${s.runs}: ${dirty.join(' | ')}`);
+  const dirty = uncommitted(s);
+  if (dirty.length) throw new Stop(`Agent run ${s.runs} left uncommitted changes, so the tested code wouldn't be the pushed code: ${dirty.join(', ')}`);
 }
 
+const uncommitted = (s) => sh('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: s.dir }).split('\n').filter((l) => l && !/ \.agent\//.test(l) && !/ node_modules$/.test(l));
 function npmTest(dir) {
-  const r = spawnSync('npm', ['test'], { cwd: dir, encoding: 'utf8', timeout: LIMITS.testRunMin * 60000 });
+  const r = spawnSync(SANDBOX, ['npm', 'test'], { cwd: dir, encoding: 'utf8', timeout: LIMITS.testRunMin * 60000 });
   const out = (r.stdout || '') + (r.stderr || '');
   return { ok: r.status === 0 && !/^FAIL /m.test(out), out, fails: out.split('\n').filter((l) => /^FAIL |^✖ |AssertionError/.test(l)) };
 }
@@ -147,6 +165,19 @@ function testNames(s, sha) {
     for (const m of l.matchAll(/\bcheck\(.*?,\s*(['"`])((?:(?!\1).)+?)(?:\1|\$\{)/g)) names.add(m[2].split('${')[0]);
   }
   return [...names].map((x) => x.split('\\')[0].trim()).filter((x) => x.length >= 8);
+}
+// Failures of the named tests that are assertions, not crashes: a unit test's ✖ block must hold an
+// AssertionError. A two-browser FAIL line comes from check(), which is an assertion by construction.
+function assertionFailures(out, names) {
+  const lines = out.split('\n'), hits = [];
+  lines.forEach((l, i) => {
+    if (!names.some((nm) => l.includes(nm))) return;
+    if (/^FAIL /.test(l)) return hits.push(l);
+    if (!/^\s*✖ /.test(l)) return;
+    const end = lines.findIndex((x, j) => j > i && /^\s*(✖|✔|ℹ) /.test(x));
+    if (lines.slice(i + 1, end < 0 ? i + 20 : end).some((x) => /AssertionError/.test(x))) hits.push(l.trim());
+  });
+  return [...new Set(hits)];
 }
 // Every `test:` commit since `base` must change only tests and must fail on its own new tests.
 function proveRed(n, s, base) {
@@ -167,8 +198,8 @@ function proveRed(n, s, base) {
     sh('git', ['worktree', 'remove', '--force', dir], { cwd: MAIN });
     if (t.ok) throw new Stop(`\`${c.sha.slice(0, 7)} ${c.subject}\` passes on its own, so its tests don't prove anything.`);
     // a red that doesn't name one of the new tests could be a syntax error or the relay being down
-    const names = testNames(s, c.sha), named = t.fails.filter((l) => names.some((nm) => l.includes(nm)));
-    if (!named.length) throw new Stop(`\`${c.sha.slice(0, 7)} ${c.subject}\` fails, but no failing line names one of its new tests (${names.slice(0, 5).map((x) => `"${x}"`).join(', ') || 'none found'}). It may have failed for another reason.\n\n${fence(t.fails.slice(0, 15).join('\n'))}`);
+    const names = testNames(s, c.sha), named = assertionFailures(t.out, names);
+    if (!named.length) throw new Stop(`\`${c.sha.slice(0, 7)} ${c.subject}\` fails, but no assertion fails in one of its new tests (${names.slice(0, 5).map((x) => `"${x}"`).join(', ') || 'none found'}). It may have failed for another reason.\n\n${fence(t.fails.slice(0, 15).join('\n'))}`);
     lines.push(`- \`${c.sha.slice(0, 7)}\` ${c.subject}: **fails on its own new tests** (${named.length} of ${t.fails.length} failing lines), for example \`${named[0].slice(0, 120)}\``);
     event(n, `red checked: ${c.sha.slice(0, 7)} fails on its own (${t.fails.length} failing lines)`);
   }
@@ -190,6 +221,7 @@ function checkAndPush(n, s, why) {
   for (let attempt = 1; ; attempt++) {
     if (agentFile(s, 'stop.md')) throw new Stop('The agent stopped instead of guessing:\n\n' + agentFile(s, 'stop.md'));
     if (head(s) === (s.head || s.base)) throw new Stop('The agent made no new commits.');
+    if (uncommitted(s).length) throw new Stop(`Uncommitted changes before testing: ${uncommitted(s).join(', ')}`);
     const t = npmTest(s.dir);
     writeFileSync(join(HOME, 'logs', `${n}-${s.runs}-npm-test.log`), t.out);
     event(n, `npm test ${t.ok ? 'passed' : 'FAILED'} on ${head(s).slice(0, 7)}`);

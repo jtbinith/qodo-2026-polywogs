@@ -38,7 +38,7 @@ Then label a ticket `ready-for-agent`. Progress is in `~/.local/state/qodo-agent
 
 ## Verify
 ```sh
-npm run test:unit       # check.js
+npm run test:unit       # every tests/*.test.mjs
 npm run test:browsers   # two-browser test, direct then relay (needs internet)
 npm test                # both
 ```
