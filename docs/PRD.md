@@ -170,6 +170,7 @@ Priorities use MoSCoW: **M**ust, **S**hould, **C**ould.
 | US16 | A phone and a laptop with the room open, one person | They scan the laptop's QR code with the phone | The two screens join without anyone else |
 | US17 | A received print | The user presses "Send to…" and picks a device, using only a keyboard or screen reader | The file is sent. Every print, button and join tab has a spoken label |
 | US18 | Three joined screens | Sam drops a photo into the shared space | Both other devices fetch it without anyone dragging. Each shows "1 new photo from Sam" |
+| US18 | Two screens joined with join tabs 3 seconds ago | Sam drops a photo | Nothing is fetched by itself until the 10-second Undo window has passed. Undo in that time means nothing was ever fetched |
 | US18 | A joined screen and a 30 MB video | It is dropped into the shared space | It isn't fetched by itself. Its card says "30 MB. Tap to get it" |
 | US19 | Five devices in a room, two of them joined | Sam drops a photo on the "For everyone" tray | All four other devices receive it. Sam's print shows "Received by 4 of 4" |
 | US20 | 12 received photos on a phone | The receiver taps "Save all" | The share sheet opens once with all 12 files |
@@ -218,7 +219,7 @@ Every feature of the product is listed here. IDs are permanent: a dropped requir
 | F8 | Share any file, not just photos and videos | S | A PDF and a .docx arrive verified and show as cards with their name and size |
 | F9 | Share short text | S | US13. At most 5,000 characters |
 | F10 | One person can join their own two devices | M | US16. Scan a QR code shown on one screen with the other. Or tap both screens within 3 seconds. The second screen joins below the first. It can be moved to another edge with the mini-map (C16) |
-| F11 | Joined screens receive by themselves | S | US18. A print dropped into a joined space is fetched by every joined device without a drag. "Received" is not "saved": photos wait in the app until saved. Only prints from devices in the same joined group are fetched this way. Files over 20 MB wait for a tap |
+| F11 | Joined screens receive by themselves | S | US18. A print dropped into a joined space is fetched by every joined device without a drag. Fetching by itself only starts once a join has settled: a mini-map join is settled when it is accepted, a join-tab join when its 10-second Undo window has passed with no Undo. Only prints dropped after the join settled are fetched by themselves. Prints from before need a tap. "Received" is not "saved": photos wait in the app until saved. Only prints from devices in the same joined group are fetched this way. Files over 20 MB wait for a tap |
 | F12 | Share with everyone | S | US19, UC9. A "For everyone" tray and a "Share with everyone" option on every print. Every device in the room receives it, joined or not. The same 20 MB limit as F11 applies |
 | F13 | Save all | S | US20. One tap saves every received photo: phones open the share sheet once with all the files, laptops download them |
 | F14 | Delivery receipts | C | The sender's print shows "Received by 4 of 5" |

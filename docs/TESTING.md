@@ -67,7 +67,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | L2 | Acceptance | A first-time user joins screens with only the on-screen guide (manual) |
 | C15 | System | Two browsers click facing join tabs within 2 s and join. Non-facing tabs don't join and nor do taps 3 s apart. Undo splits them (to write) |
 | C16 | Integration | A mini-map request joins nothing until the other device accepts. "No" leaves both screens as they were (to write) |
-| F11, F12 | System | Three devices: a print dropped into a joined space is fetched by both others with no drag. A print shared with everyone reaches a device that isn't joined. A 30 MB file waits for a tap (to write) |
+| F11, F12 | System | Three devices: a print dropped into a joined space is fetched by both others with no drag. A print shared with everyone reaches a device that isn't joined. A 30 MB file waits for a tap. Nothing is fetched by itself during a join's 10-second Undo window, nor prints from before the join (to write) |
 | F13 | Acceptance | "Save all" opens the share sheet once with every received photo on an iPhone and an Android phone (manual) |
 | F16 | System | A drag ended by `pointercancel` puts the print back. A print pushed past the screen edge keeps 40 px on screen. A print dropped across a shared edge ends fully on one screen (to write) |
 | F17 | System | Click, move, click moves a print with no button held. Esc puts it back (to write) |
