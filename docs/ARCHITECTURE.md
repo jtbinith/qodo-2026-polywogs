@@ -157,6 +157,7 @@ The rules in [AGENTS.md](../AGENTS.md) shape the design:
 4. **Fingerprint:** a file is kept only if it matches its fingerprint.
 5. **Two-Browser:** joining and transfer changes pass the two-browser test before merging.
 6. **Allowlist:** metadata leaves the device only as fields we have named and chosen to keep.
+7. **Fresh Read:** the runner decides from what GitHub shows now, not its own notes.
 
 ## 9. Dependencies
 | Dependency | Used for | Notes |
