@@ -95,6 +95,15 @@ Builders follow these rules. Reviewers flag any change that breaks one, even if 
 - **Why:** on Day 1 a review tool's fix looked right and broke the site twice: it crashed as soon as two devices connected and screens could never join. Only this test caught it.
 - **Checked by:** the test output in the PR description. If a run couldn't happen (for example no internet for the relay run), the PR says so. It never claims a pass it didn't see.
 
+### The factory
+
+**7. The runner trusts what GitHub shows, not its own notes** (the Fresh Read Rule)
+- **Rule:** the runner decides from what GitHub shows now, all of it: every page of comments, events and labels, read with `allPages`. What it saves between runs (counts, markers like `lastAsk` and `pushedAt`, local files like `<n>-pr-body.md`) is only a note. When a note and GitHub disagree, GitHub wins. Nothing is marked posted, read or done until GitHub shows it happened.
+- **Where:** `scripts/agent-watch.mjs` and `scripts/runner-lib.mjs`: every read of tickets, PRs, comments, events and labels, and everything the runner saves about them. Rule 3 covers the same idea in `web/`.
+- **Why:** this was the most common cause in Qodo's reviews of the runner: 8 of its 26 findings, across 4 PRs. I wrote the rule from #48, #51 and #53, then checked it against #60, which it hadn't seen. It predicted 3 of #60's 6 findings. The rest belong to other causes.
+- **Breaks it:** reading only the first 100 comments or events (#48). Changing the local PR description and not the PR (#51). Moving `lastAsk` past an instruction that hasn't been carried out (#53). Saving a proof as posted when it was only rehearsed (#60).
+- **Checked by:** `tests/runner-lib.test.mjs` (`allPages` reads past 100, `publishPlan` works out what to post from the PR itself, `askPlan` marks a comment read). In review: any GitHub read that stops at one page, any decision made from a saved note that GitHub could contradict and anything marked done before GitHub shows it.
+
 ## Known gaps
 These are known. Don't flag them as new findings. Do flag any change that makes them worse.
 - The room server could swap public keys during key exchange. There is no check both people can compare yet.
