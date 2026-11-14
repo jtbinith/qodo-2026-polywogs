@@ -40,6 +40,7 @@ Which level of test proves each requirement. Results are recorded on each requir
 | US1–US17 | Acceptance | Each Given / When / Then on real devices |
 | Misuse cases | Acceptance, Integration | Each attack must fail. The threat model says which run automatically |
 | C2–C9, C13 | System | Two-browser test, direct and relay (exists) |
+| C6 | System | The two-browser test puts a print on B's screen with a plain move. B taps it: it says "Receiving…", asks once even when tapped again while the photo is arriving, and the file arrives byte-identical. A print whose middle is on another screen still says "Drag it onto your screen first" and fetches nothing. With every incoming slot taken, a tap says "Too many photos arriving. Try again in a moment" and asks for nothing. Your own print says "Already yours" (exists) |
 | C14, F1, F5, F7–F10 | System | New two-browser cases (to write) |
 | N2, Q2 | System | Two-browser test in Chromium and WebKit |
 | Q1 | System | Two-browser test as a required GitHub check |

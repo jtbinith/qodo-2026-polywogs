@@ -194,7 +194,7 @@ Every feature of the product is listed here. IDs are permanent: a dropped requir
 | C3 | A shared clock lets join taps from different devices be paired | M | Taps within 2 seconds of each other pair on every device's clock |
 | C4 | Several photos and videos can be picked at once and appear as prints with thumbnails for everyone | M | Picked files appear on every joined screen |
 | C5 | Prints stay in place when screens join or a screen leaves | M | No print moves on screen when the layout changes |
-| C6 | Dragging a print onto your screen fetches the full file | M | US1 |
+| C6 | Dragging a print onto your screen, or tapping one already there, fetches the full file | M | US1 |
 | C7 | Tapping a received print saves it | M | The share sheet opens on phones. A download starts on laptops |
 | C8 | Files go directly between devices over WebRTC | M | Two devices on an open network use a direct link |
 | C9 | When a direct link is blocked, files go through an end-to-end encrypted relay | M | Two devices on a network that blocks WebRTC still exchange files. The server sees only ciphertext |

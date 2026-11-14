@@ -222,6 +222,63 @@ try {
   for (const label of ['401 x 400', '30000 x 30000 bomb', '400 x 400 with data after its end'])
     check(!shown[label].img && !shown[label].kept && !shown[label].decoded, `a ${label} thumbnail isn't decoded and the print shows a plain card (${JSON.stringify(shown[label])})`);
 
+  // tapping a print that already sits on your screen fetches it, the same as dropping it there
+  // (C6, #41). A puts IMG_0004.JPG on B's screen with a plain move (no drop), and holds its reply
+  // back for 2 s so B's second tap lands while the photo is still arriving: no second request.
+  // A print whose middle is on A's part of the space still says to drag it, and fetches nothing
+  const place = async (name, x, y) => A.evaluate(([name, b, x, y]) => {
+    const t = window.__t, p = [...t.prints.values()].find((p) => p.name === name);
+    p.anchor = b; p.x = x; p.y = y;
+    t.peers.send(b, { t: 'move', pid: p.pid, anchor: b, x, y, final: true });
+    return p.pid;
+  }, [name, ids.b, x, y]);
+  const tapPid = await place('IMG_0004.JPG', 120, 300);
+  const edgePid = await place('IMG_0005.JPG', -100, 60);   // 150 wide: its middle is 25 px onto A's screen
+  await A.evaluate((pid) => { const t = window.__t, real = t.peers.sendFile;
+    t.peers.sendFile = (to, fid, ...a) => fid === pid ? new Promise((r) => setTimeout(r, 2000)).then(() => real(to, fid, ...a)) : real(to, fid, ...a); }, tapPid);
+  await until(B, ([a, b]) => { const t = window.__t, pa = t.prints.get(a), pb = t.prints.get(b);
+    return pa?.anchor === t.id && pa.x === 120 && pb?.anchor === t.id && pb.x === -100; }, [tapPid, edgePid]);
+  await B.evaluate(() => { const t = window.__t, real = t.peers.send; t.wants = [];
+    t.peers.send = (to, m, ...a) => { if (m?.t === 'want') t.wants.push(m.pid); return real(to, m, ...a); }; });
+  const centre = (pid) => B.evaluate((pid) => { const t = window.__t, p = t.prints.get(pid);
+    t.prints.delete(pid); t.prints.set(pid, p);   // on top, so the tap picks this print
+    const [wx, wy] = t.world(p), me = t.layout.pos[t.id]; return { x: Math.max(2, wx - me[0] + p.w / 2), y: wy - me[1] + p.h / 2 }; }, pid);
+  const toastB = () => B.evaluate(() => document.getElementById('toast').textContent);
+  let at = await centre(edgePid);
+  await B.mouse.click(at.x, at.y);
+  const edgeSaid = await toastB();
+  check(edgeSaid === 'Drag it onto your screen first' && !(await B.evaluate(() => window.__t.wants.length)), `tapping a print on another screen says "${edgeSaid}" and fetches nothing`);
+  at = await centre(tapPid);
+  // while B already has as many transfers arriving as it accepts, a tap can't take the photo:
+  // it says so, asks for nothing and doesn't claim it's arriving (#52 review)
+  const filled = await B.evaluate(() => { const t = window.__t, fake = [];
+    for (let i = 0; i < 1000; i++) { const before = t.incoming.size; t.expect('full:' + i, 'nobody', 1); if (t.incoming.size === before) break; fake.push('full:' + i); }
+    return fake; });
+  await B.mouse.click(at.x, at.y);
+  const fullSaid = await toastB();
+  const fullAsked = await B.evaluate((pid) => ({ wants: window.__t.wants.length, expecting: window.__t.incoming.has(pid) }), tapPid);
+  check(fullSaid === 'Too many photos arriving. Try again in a moment' && !fullAsked.wants && !fullAsked.expecting,
+    `tapping while every incoming slot is taken says "${fullSaid}" and asks for nothing (${JSON.stringify(fullAsked)})`);
+  await B.evaluate((fake) => fake.forEach((f) => window.__t.incoming.delete(f)), filled);
+  await B.mouse.click(at.x, at.y);
+  const tapSaid = await toastB();
+  check(tapSaid === 'Receiving…', `tapping a print on your screen says "${tapSaid}"`);
+  const stillComing = await B.evaluate((pid) => window.__t.incoming.has(pid) && !window.__t.files.has(pid), tapPid);
+  await B.mouse.click(at.x, at.y);
+  const tapArrived = await until(B, (pid) => window.__t.files.has(pid), tapPid, 60000).then(() => true, () => false);
+  const tapWants = await B.evaluate((pid) => window.__t.wants.filter((w) => w === pid).length, tapPid);
+  check(stillComing && tapWants === 1, `taps asked for the photo ${tapWants} time(s), once wanted (second tap while still arriving: ${stillComing})`);
+  const read = (page, pid) => page.evaluate(async (pid) => { const f = window.__t.files.get(pid); return f ? [...new Uint8Array(await f.arrayBuffer())] : null; }, pid);
+  const tapped = tapArrived ? await read(B, tapPid) : null, sentBytes = await read(A, tapPid);
+  check(!!tapped && sha(Buffer.from(tapped)) === sha(Buffer.from(sentBytes)), `IMG_0004.JPG arrived byte-identical after a tap (arrived: ${tapArrived})`);
+  // A taps its own print (IMG_0005.JPG, whose middle is on A's screen)
+  const own = await A.evaluate((pid) => { const t = window.__t, p = t.prints.get(pid);
+    t.prints.delete(pid); t.prints.set(pid, p);
+    const [wx, wy] = t.world(p), me = t.layout.pos[t.id]; return { x: wx - me[0] + p.w / 2, y: wy - me[1] + p.h / 2 }; }, edgePid);
+  await A.mouse.click(own.x, own.y);
+  const ownSaid = await A.evaluate(() => document.getElementById('toast').textContent);
+  check(ownSaid === 'Already yours', `tapping your own print says "${ownSaid}"`);
+
   // a late guest still gets photos B holds after A (the owner) leaves
   await A.context().close();
   const C = await device(390, 700);

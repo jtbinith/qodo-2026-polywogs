@@ -158,8 +158,9 @@ function announce(peer, p) {
 // Transfers we've asked for (or been told to expect): fid -> { from, size, parts, got, n, cs, last, asks }.
 // Pieces for anything else are dropped, so a stranger can't make us store data.
 function expect(fid, from, size) {
-  if (incoming.has(fid) || incoming.size >= LIMITS.incoming) return;
+  if (incoming.has(fid) || incoming.size >= LIMITS.incoming) return false;   // full: the caller says so, and doesn't ask
   incoming.set(fid, { from, size, parts: null, got: 0, n: 0, cs: 0, last: performance.now(), asks: 0 });
+  return true;
 }
 function onMessage(from, m, bytes) {
   if (m.t === 'print') {
@@ -247,13 +248,13 @@ function screenAt(x, y) {
   }
   return null;
 }
+const onMyScreen = (p) => { const [x, y] = world(p); return screenAt(x + p.w / 2, y + p.h / 2) === id; };
 function dropped(p) {
   // landed on my screen and I don't have it yet: ask the owner for the full photo
-  const [x, y] = world(p);
-  if (screenAt(x + p.w / 2, y + p.h / 2) === id && !files.has(p.pid) && !incoming.has(p.pid)) {
+  if (onMyScreen(p) && !files.has(p.pid) && !incoming.has(p.pid)) {
     const src = p.holders.find((k) => k !== id && net.peers[k]) || p.owner;
+    if (!expect(p.pid, src, p.size)) return toast('Too many photos arriving. Try again in a moment');
     p.lastSource = src;
-    expect(p.pid, src, p.size);
     peers.send(src, { t: 'want', pid: p.pid });
     toast('Receiving…');
   }
@@ -298,7 +299,12 @@ cv.addEventListener('pointerup', (e) => {
 // Saving must happen inside the tap, with the file already in hand (iOS rule).
 function save(p) {
   const file = files.get(p.pid);
-  if (!file) return toast(p.owner === id ? 'Yours' : 'Drag it onto your screen first');
+  if (!file) {
+    if (p.owner === id) return toast('Yours');
+    if (incoming.has(p.pid)) return toast('Receiving…');   // already asked: don't ask twice
+    if (onMyScreen(p)) return dropped(p);                  // on my screen: a tap fetches it, like a drop (C6)
+    return toast('Drag it onto your screen first');
+  }
   if (p.owner === id) return toast('Already yours');
   if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file] }).catch(() => {});
   else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click(); }
